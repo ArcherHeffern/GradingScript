@@ -3,9 +3,10 @@
 set -euo pipefail 
 
 # TODO
-# - Check if fd is installed
-# - Support expected output
+# - Support comparing student output with expected output and saving as diff
 # - Cd doesn't check for errors
+
+command -v fd >/dev/null 2>&1 || { echo >&2 "Script requires 'fd' but it's not installed.  Aborting."; exit 1; }
 
 # Process arguments
 
