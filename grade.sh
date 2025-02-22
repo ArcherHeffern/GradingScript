@@ -2,6 +2,11 @@
 
 set -euo pipefail 
 
+# TODO
+# - Check if fd is installed
+# - Support expected output
+# - Cd doesn't check for errors
+
 # Process arguments
 
 INPUT_ZIPFILE="${1-}"
@@ -11,7 +16,7 @@ then
 	exit 1
 fi 
 
-if [[ -z "${INPUT_ZIPFILE}" ]];
+if [[ ! -f "${INPUT_ZIPFILE}" ]];
 then 
 	echo "Error: ${INPUT_ZIPFILE} does not exist"
 	exit 1
@@ -22,11 +27,11 @@ ZIPPED="zipped/"
 UNZIPPED="unzipped/"
 RESULTS="results/"
 TEST_CLASS="Test.java"
-PROJECT_CLASSES="PCB.java ProcessManager.java Queue.java"
+PROJECT_CLASSES=("PCB.java ProcessManager.java Queue.java")
 EXPECTED_OUTPUT="expected.txt" # Not used
 MOODLE_SUBMISSION_EXTENSION="_assignsubmission_file"
 
-if [[ -z "${TEST_CLASS}" ]]; 
+if [[ ! -f "${TEST_CLASS}" ]]; 
 then
 	echo "Error: Test Class does not exist at ${TEST_CLASS}."
 	exit 1
@@ -34,9 +39,7 @@ fi
 
 # Reset: Remove $ZIPPED, $UNZIPPED, and $RESULTS
 rm -rf "${ZIPPED}" "${UNZIPPED}" "${RESULTS}"
-mkdir "${ZIPPED}"
-mkdir "${UNZIPPED}"
-mkdir "${RESULTS}"
+mkdir -p "${ZIPPED}" "${UNZIPPED}" "${RESULTS}"
 
 # Post processing of variables - Don't touch!
 RESULTS="$(realpath "${RESULTS}")/"
@@ -63,7 +66,7 @@ for project in "${projects[@]}"; do
 	cd "${dest}"
 	cp "${TEST_CLASS_ABS_PATH}" .
 	result_dest="${RESULTS}${student}"
-	if ! java "${TEST_CLASS}" $PROJECT_CLASSES &> "${result_dest}";
+	if ! java "${TEST_CLASS}" "${PROJECT_CLASSES[@]}" &> "${result_dest}";
 	then
 		echo "Failed to run ${student}'s submission"
 	fi
