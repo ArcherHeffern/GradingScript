@@ -28,7 +28,7 @@ ZIPPED="zipped/"
 UNZIPPED="unzipped/"
 RESULTS="results/"
 TEST_CLASS="Test.java"
-PROJECT_CLASSES=("PCB.java ProcessManager.java Queue.java")
+PROJECT_CLASSES=("PCB.java" "ProcessManager.java" "Queue.java")
 EXPECTED_OUTPUT="expected.txt" # Not used
 MOODLE_SUBMISSION_EXTENSION="_assignsubmission_file"
 
