@@ -48,7 +48,13 @@ mkdir -p "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${CLEAN_UNZIPPED}" "${RESULTS}"
 
 # Post processing of variables - Don't touch!
 RESULTS="$(realpath "${RESULTS}")/"
+if [[ $? -ne 0 ]]; then
+	echo "Failed to find realpath of ${RESULTS}"
+fi
 TEST_CLASS_ABS_PATH="$(realpath "${TEST_CLASS}")"
+if [[ $? -ne 0 ]]; then
+	echo "Failed to find realpath of ${TEST_CLASS}"
+fi
 
 # Unzip all moodle zipfile
 unzip "${INPUT_ZIPFILE}" -d "${ZIPPED}" > /dev/null
@@ -94,14 +100,21 @@ for student_submission_zipped in "${student_submissions_zipped[@]}"; do
 		fi 
 		clean_dest="${student_submission_unzipped_clean}${PROJECT_CLASS}"
 		mkdir -p "$(dirname "${clean_dest}")"
-		mv "${project_class_unclean_location[0]}" "${clean_dest}"
+		if ! mv "${project_class_unclean_location[0]}" "${clean_dest}"; then
+			echo "Failed to move ${project_class_unclean_location[0]} to ${clean_dest}. Aborting..."
+			ok=false
+			break
+		fi
 	done
 	if ! $ok; then
 		continue
 	fi
 	test_file_dest_dir="${CLEAN_UNZIPPED}${student_id}/${TEST_CLASS_DEST}"
 	mkdir -p "${test_file_dest_dir}"
-	cp "${TEST_CLASS_ABS_PATH}" "${test_file_dest_dir}${TEST_CLASS}"
+	if ! cp "${TEST_CLASS_ABS_PATH}" "${test_file_dest_dir}${TEST_CLASS}"; then
+		echo "Failed to copy ${TEST_CLASS_ABS_PATH} to ${test_file_dest_dir}${TEST_CLASS}. Aborting..."
+		continue
+	fi
 	continue
 
 	# ============
@@ -112,7 +125,10 @@ for student_submission_zipped in "${student_submissions_zipped[@]}"; do
 	# - Switch permission of dest to user. 
 	# - Run program as user
 	# Run submission and write output to $OUTPUT
-	cd "${student_submission_unzipped_clean}"
+	if ! cd "${student_submission_unzipped_clean}"; then
+		echo "Failed to cd into ${student_submission_unzipped_clean}. Aborting..."
+		continue
+	fi
 	
 	result_dest="${RESULTS}${student_id}"
 	if ! java "${TEST_CLASS}" "${PROJECT_CLASSES[@]}" &> "${result_dest}";
@@ -121,7 +137,10 @@ for student_submission_zipped in "${student_submissions_zipped[@]}"; do
 	fi
 
 	# TODO: Switch back to root. Delete user. cd back
-	cd - > /dev/null
+	if ! cd - > /dev/null; then
+		echo "Failed to cd back from ${student_submission_unzipped_clean}. Aborting..."
+		continue
+	fi
 done
 
 # Clean up
