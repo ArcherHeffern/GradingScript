@@ -1,5 +1,6 @@
 results/*
-unzipped/*
+unclean_unzipped/*
+clean_unzipped/*
 zipped/*
 .DS_Store
 *.zip
