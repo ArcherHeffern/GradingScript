@@ -8,9 +8,6 @@ set -euo pipefail
 
 # TODO
 # - Support comparing student output with expected output and saving as diff
-# - Cd doesn't check for errors
-# - Verify the test script is ran and student doesn't override it 
-# - Ensure zip is installed
 # - Seperate test output and this program output 
 # - Paralellize with GNU Parallel
 
