@@ -6,16 +6,23 @@ set -euo pipefail
 # - Support comparing student output with expected output and saving as diff
 # - Cd doesn't check for errors
 # - Verify the test script is ran and student doesn't override it 
+# - Ensure zip is installed
 
-
-command -v fd >/dev/null 2>&1 || { echo >&2 "Script requires 'fd' but it's not installed.  Aborting."; exit 1; }
+if command -v fd >/dev/null 2>&1; then
+    FD_CMD="fd"
+elif command -v fdfind >/dev/null 2>&1; then
+    FD_CMD="fdfind"
+else
+    echo >&2 "Script requires 'fd' (or 'fdfind' on Debian-based systems) but neither is installed. Aborting."
+    exit 1
+fi
 
 # Process arguments
 
 INPUT_ZIPFILE="${1-}"
 if [[ -z "${INPUT_ZIPFILE}" ]];
 then
-	echo "Usage: ${0} submissions_zipfile dest_dir"
+	echo "Usage: ${0} submissions_zipfile"
 	exit 1
 fi 
 
@@ -60,7 +67,7 @@ fi
 unzip "${INPUT_ZIPFILE}" -d "${ZIPPED}" > /dev/null
 
 # Process all submissions
-mapfile -t student_submissions_zipped < <(fd --full-path -I -e=zip "${MOODLE_SUBMISSION_EXTENSION}" "${ZIPPED}")
+mapfile -t student_submissions_zipped < <("${FD_CMD}" --full-path -I -e=zip "${MOODLE_SUBMISSION_EXTENSION}" "${ZIPPED}")
 
 for student_submission_zipped in "${student_submissions_zipped[@]}"; do
 	student_id="$(basename "${student_submission_zipped::-4}")"
@@ -85,7 +92,7 @@ for student_submission_zipped in "${student_submissions_zipped[@]}"; do
 	ok=true
 	student_submission_unzipped_clean="${CLEAN_UNZIPPED}${student_id}/"
 	for PROJECT_CLASS in "${PROJECT_CLASSES[@]}"; do
-		mapfile -t project_class_unclean_location < <(fd -Ipt file "${PROJECT_CLASS}" "${student_submission_unzipped_unclean}")
+		mapfile -t project_class_unclean_location < <("${FD_CMD}" -Ipt file "${PROJECT_CLASS}" "${student_submission_unzipped_unclean}")
 		num_file_matches="${#project_class_unclean_location[@]}"
 		if [[ "${num_file_matches}" -gt 1 ]];
 		then
@@ -109,6 +116,7 @@ for student_submission_zipped in "${student_submissions_zipped[@]}"; do
 	if ! $ok; then
 		continue
 	fi
+
 	test_file_dest_dir="${CLEAN_UNZIPPED}${student_id}/${TEST_CLASS_DEST}"
 	mkdir -p "${test_file_dest_dir}"
 	if ! cp "${TEST_CLASS_ABS_PATH}" "${test_file_dest_dir}${TEST_CLASS}"; then
