@@ -2,11 +2,17 @@
 
 set -euo pipefail 
 
+# Terminology
+# - Aborting: Ending the program due to critical error
+# - Skipping: Skipping a student due to student specific error
+
 # TODO
 # - Support comparing student output with expected output and saving as diff
 # - Cd doesn't check for errors
 # - Verify the test script is ran and student doesn't override it 
 # - Ensure zip is installed
+# - Seperate test output and this program output 
+# - Paralellize with GNU Parallel
 
 if command -v fd >/dev/null 2>&1; then
     FD_CMD="fd"
@@ -16,6 +22,15 @@ else
     echo >&2 "Script requires 'fd' (or 'fdfind' on Debian-based systems) but neither is installed. Aborting."
     exit 1
 fi
+
+DEPENDENCIES=('firejail' 'zip')
+for DEPENDENCY in "${DEPENDENCIES[@]}"; do
+	if ! command -v "${DEPENDENCY}" > /dev/null 2>&1; then
+		echo >&2 "Script requires '${DEPENDENCY}' but isn't installed. Aborting."
+		exit 1
+	fi
+done
+
 
 # Process arguments
 
@@ -96,19 +111,19 @@ for student_submission_zipped in "${student_submissions_zipped[@]}"; do
 		num_file_matches="${#project_class_unclean_location[@]}"
 		if [[ "${num_file_matches}" -gt 1 ]];
 		then
-			echo "${student_id}: Too many files matching ${PROJECT_CLASS}. Aborting..."
+			echo "Too many files matching ${PROJECT_CLASS}. Skipping..."
 			ok=false
 			break
 		elif [[ "${num_file_matches}" -lt 1 ]];
 		then
-			echo "${student_id}: No files matching ${PROJECT_CLASS}. Aborting..."
+			echo "No files matching ${PROJECT_CLASS}. Skipping..."
 			ok=false
 			break
 		fi 
 		clean_dest="${student_submission_unzipped_clean}${PROJECT_CLASS}"
 		mkdir -p "$(dirname "${clean_dest}")"
 		if ! mv "${project_class_unclean_location[0]}" "${clean_dest}"; then
-			echo "Failed to move ${project_class_unclean_location[0]} to ${clean_dest}. Aborting..."
+			echo "Failed to move ${project_class_unclean_location[0]} to ${clean_dest}. Skipping..."
 			ok=false
 			break
 		fi
@@ -117,39 +132,35 @@ for student_submission_zipped in "${student_submissions_zipped[@]}"; do
 		continue
 	fi
 
-	test_file_dest_dir="${CLEAN_UNZIPPED}${student_id}/${TEST_CLASS_DEST}"
+	test_file_dest_dir="${student_submission_unzipped_clean}${TEST_CLASS_DEST}"
 	mkdir -p "${test_file_dest_dir}"
 	if ! cp "${TEST_CLASS_ABS_PATH}" "${test_file_dest_dir}${TEST_CLASS}"; then
-		echo "Failed to copy ${TEST_CLASS_ABS_PATH} to ${test_file_dest_dir}${TEST_CLASS}. Aborting..."
+		echo "Failed to copy ${TEST_CLASS_ABS_PATH} to ${test_file_dest_dir}${TEST_CLASS}. Skipping..."
 		continue
 	fi
-	continue
 
 	# ============
-	# Execute Program Securely
+	# Compile and Run Program Securely
 	# ============
-	# TODO
-	# - Create new user
-	# - Switch permission of dest to user. 
-	# - Run program as user
-	# Run submission and write output to $OUTPUT
-	if ! cd "${student_submission_unzipped_clean}"; then
-		echo "Failed to cd into ${student_submission_unzipped_clean}. Aborting..."
-		continue
-	fi
-	
+	# Verifies the testfile was fully run by creating a file with a known value at the end of execution
 	result_dest="${RESULTS}${student_id}"
-	if ! java "${TEST_CLASS}" "${PROJECT_CLASSES[@]}" &> "${result_dest}";
+	expected_filename="grader_${RANDOM}.txt"
+	if ! firejail \
+		--noprofile \
+		--read-only=/ \
+		--private-cwd="$(realpath "${student_submission_unzipped_clean}")" \
+		--whitelist="$(realpath "${student_submission_unzipped_clean}")" \
+		java -cp "${student_submission_unzipped_clean}" "${TEST_CLASS_DEST}${TEST_CLASS}" -- "${expected_filename}" 2> /dev/null | head -n-1 > "${result_dest}" 
 	then
 		echo "Failed to run ${student_id}'s submission"
+		continue
 	fi
-
-	# TODO: Switch back to root. Delete user. cd back
-	if ! cd - > /dev/null; then
-		echo "Failed to cd back from ${student_submission_unzipped_clean}. Aborting..."
+	if [[ ! -f "${student_submission_unzipped_clean}${expected_filename}" ]]; then
+		echo "Expected ${TEST_CLASS} to create ${expected_filename} but didn't."
 		continue
 	fi
 done
 
 # Clean up
-rm -rf "${ZIPPED}" "${UNCLEAN_UNZIPPED}" 
+echo "Cleaning up..."
+rm -rf "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${CLEAN_UNZIPPED}"
