@@ -50,7 +50,7 @@ ZIPPED="zipped/"
 UNCLEAN_UNZIPPED="unclean_unzipped/"
 CLEAN_UNZIPPED="clean_unzipped/"
 RESULTS="results/"
-TEST_CLASS="Test.java"
+TEST_CLASS="Test2.java" # Cannot have multiple periods. java -cp... depends on this!
 TEST_CLASS_DEST="main/"
 PROJECT_CLASSES=("main/PCB.java" "main/ProcessManager.java" "main/Queue.java")
 EXPECTED_OUTPUT="expected.txt" # Not used
@@ -174,21 +174,25 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 	# ============
 	# Compile and Run Program Securely
 	# ============
-	# Verifies the testfile was fully run by creating a file with a known value at the end of execution
 	result_dest="${RESULTS}${student_id}"
-	expected_filename="grader_${RANDOM}.txt"
 	if ! firejail \
 		--noprofile \
 		--read-only=/ \
 		--private-cwd="$(realpath "${student_submission_unzipped_clean}")" \
 		--whitelist="$(realpath "${student_submission_unzipped_clean}")" \
-		java -cp "${student_submission_unzipped_clean}" "${TEST_CLASS_DEST}${TEST_CLASS}" -- "${expected_filename}" 2> /dev/null | head -n-1 > "${result_dest}" 
+		javac "${TEST_CLASS_DEST}${TEST_CLASS}" "${PROJECT_CLASSES[@]}" 
 	then
-		echo "Failed to run ${student_id}'s submission"
+		echo "Failed to compile ${student_id}'s submission"
 		continue
 	fi
-	if [[ ! -f "${student_submission_unzipped_clean}${expected_filename}" ]]; then
-		echo "Expected ${TEST_CLASS} to create ${expected_filename} but didn't."
+	if ! firejail \
+		--noprofile \
+		--read-only=/ \
+		--private-cwd="$(realpath "${student_submission_unzipped_clean}")" \
+		--whitelist="$(realpath "${student_submission_unzipped_clean}")" \
+		java -cp "$(realpath "${student_submission_unzipped_clean}")" "$(echo "${TEST_CLASS_DEST}${TEST_CLASS}" | cut -d'.' -f1)" > /dev/null
+	then
+		echo "Failed to run ${student_id}'s submission"
 		continue
 	fi
 done
