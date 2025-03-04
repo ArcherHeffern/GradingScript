@@ -10,6 +10,7 @@ set -euo pipefail
 # - Support comparing student output with expected output and saving as diff
 # - Seperate test output and this program output 
 # - Paralellize with GNU Parallel
+# - Locale error: Student has name with unicode character :(
 
 if command -v fd >/dev/null 2>&1; then
     FD_CMD="fd"
@@ -79,15 +80,25 @@ fi
 unzip "${INPUT_ZIPFILE}" -d "${ZIPPED}" > /dev/null
 
 # Process all submissions
-mapfile -t student_submissions_zipped < <("${FD_CMD}" --full-path -I -e=zip "${MOODLE_SUBMISSION_EXTENSION}" "${ZIPPED}")
+mapfile -t student_submission_groups < <("${FD_CMD}" -I -t directory "${MOODLE_SUBMISSION_EXTENSION}$" "${ZIPPED}")
 
-for student_submission_zipped in "${student_submissions_zipped[@]}"; do
-	student_id="$(basename "${student_submission_zipped::-4}")"
+for student_submission_group in "${student_submission_groups[@]}"; do
+	student_id="$(echo $(basename "${student_submission_group}") | cut -d'_' -f1)"
 	echo "=== Running ${student_id}'s submission ==="
 
 	# ============
 	# Unzip submission and place in $UNCLEAN_UNZIPPED/$student_id
 	# ============
+	mapfile -t student_submissions < <("${FD_CMD}" -I -e 'zip' . "${student_submission_group}")
+	if [[ "${#student_submissions[@]}" -gt 1 ]]; then
+		echo "Multiple submissions found. Skipping..." 
+		continue
+	elif [[ "${#student_submissions[@]}" -lt 1 ]]; then
+		echo "No submission found. Skipping..." 
+		continue
+	fi
+
+	student_submission_zipped="${student_submissions[0]}"
 	student_submission_unzipped_unclean="${UNCLEAN_UNZIPPED}${student_id}/"
 	if ! unzip -q "${student_submission_zipped}" -d "${student_submission_unzipped_unclean}";
 	then
@@ -160,4 +171,4 @@ done
 
 # Clean up
 echo "Cleaning up..."
-rm -rf "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${CLEAN_UNZIPPED}"
+# rm -rf "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${CLEAN_UNZIPPED}"
