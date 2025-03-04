@@ -124,9 +124,33 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			break
 		elif [[ "${num_file_matches}" -lt 1 ]];
 		then
-			echo "No files matching ${PROJECT_CLASS}. Skipping..."
-			ok=false
-			break
+			echo "No files matching ${PROJECT_CLASS}. Attempting coersion..."
+
+			# Attempted coersion of file into correct package. If this fails not my problem
+			# Changes package of a file matching basename ${PROJECT_CLASS} to expected package in-place
+			mapfile -t project_class_unclean_location < <("${FD_CMD}" -Ipt file "$(basename "${PROJECT_CLASS}")" "${student_submission_unzipped_unclean}")
+			num_file_matches="${#project_class_unclean_location[@]}"
+			if [[ "${num_file_matches}" -gt 1 ]];
+			then
+				echo "Too many files matching $(basename ${PROJECT_CLASS}). Skipping..."
+				ok=false
+				break
+			elif [[ "${num_file_matches}" -lt 1 ]];
+			then
+				echo "No files matching $(basename ${PROJECT_CLASS}). Skipping..."
+				ok=false
+				break
+			fi
+			to_coerce="${project_class_unclean_location[0]}"
+			package="$(dirname "${PROJECT_CLASS}")"
+			if sed -r 's/\s*package.*//' "${to_coerce}" | sed "1i package ${package};" > "${to_coerce}.tmp"; then
+				mv "${to_coerce}.tmp" "${to_coerce}"
+				echo "Successfully coerced"
+			else
+				echo "Failed to coerce"
+				ok=false
+				break
+			fi
 		fi 
 		clean_dest="${student_submission_unzipped_clean}${PROJECT_CLASS}"
 		mkdir -p "$(dirname "${clean_dest}")"
@@ -171,4 +195,4 @@ done
 
 # Clean up
 echo "Cleaning up..."
-# rm -rf "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${CLEAN_UNZIPPED}"
+rm -rf "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${CLEAN_UNZIPPED}"
