@@ -174,7 +174,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 	# ============
 	# Compile and Run Program Securely
 	# ============
-	result_dest="${RESULTS}${student_id}"
+	# Writes results to a file named during runtime HAHA!
 	if ! firejail \
 		--noprofile \
 		--read-only=/ \
@@ -185,12 +185,13 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 		echo "Failed to compile ${student_id}'s submission"
 		continue
 	fi
+	results_dest="results_${RANDOM}.json"
 	if ! firejail \
 		--noprofile \
 		--read-only=/ \
 		--private-cwd="$(realpath "${student_submission_unzipped_clean}")" \
 		--whitelist="$(realpath "${student_submission_unzipped_clean}")" \
-		java -cp "$(realpath "${student_submission_unzipped_clean}")" "$(echo "${TEST_CLASS_DEST}${TEST_CLASS}" | cut -d'.' -f1)" > /dev/null
+		java -cp "$(realpath "${student_submission_unzipped_clean}")" "$(echo "${TEST_CLASS_DEST}${TEST_CLASS}" | cut -d'.' -f1)" -- "${results_dest}" > /dev/null
 	then
 		echo "Failed to run ${student_id}'s submission"
 		continue
