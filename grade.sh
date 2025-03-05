@@ -115,7 +115,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 	notes=()
 	import_errors=()
 	import_warnings=()
-	compile_errors=()
+	compile_errors=""
 	test_names=()
 	tests_passed=()
 	test_fail_reason=()
@@ -209,18 +209,20 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 		# Compile and Run Program Securely
 		# ============
 		# Writes results to a random file named during runtime HAHA!
-		if ! firejail \
+		output="$(
+		{ firejail \
 			--noprofile \
 			--read-only=/ \
 			--private-cwd="$(realpath "${student_submission_unzipped_clean}")" \
 			--whitelist="$(realpath "${student_submission_unzipped_clean}")" \
-			javac "${TEST_CLASS_DEST}${TEST_CLASS}" "${PROJECT_CLASSES[@]}" 
-		then
-			echo "Failed to compile ${student_id}'s submission"
+			javac "${TEST_CLASS_DEST}${TEST_CLASS}" "${PROJECT_CLASSES[@]}" \
+			|| true
+		} 2>&1 > /dev/null | tail -n+3 | head -n-2
+		)"
+		if [[ "${#output}" -ne 0 ]]; then # scary!
+			compile_errors="${output}"
 			continue
 		fi
-
-		continue
 
 		results_dest="results_${RANDOM}.json"
 		if ! firejail \
@@ -228,9 +230,9 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			--read-only=/ \
 			--private-cwd="$(realpath "${student_submission_unzipped_clean}")" \
 			--whitelist="$(realpath "${student_submission_unzipped_clean}")" \
-			java -cp "$(realpath "${student_submission_unzipped_clean}")" "$(echo "${TEST_CLASS_DEST}${TEST_CLASS}" | cut -d'.' -f1)" -- "${results_dest}" > /dev/null
+			java -cp "$(realpath "${student_submission_unzipped_clean}")" "$(echo "${TEST_CLASS_DEST}${TEST_CLASS}" | cut -d'.' -f1)" -- "${results_dest}" &> /dev/null
 		then
-			echo "Failed to run ${student_id}'s submission"
+			echo "Failed to run ${student_id}'s submission" # TODO: Should I handle this? 
 			continue
 		fi
 		# Parse Results
@@ -256,6 +258,10 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 	fi
 	escaped_student_id="$(escape "${student_id}")"
 	escaped_collated_notes=""
+	for note in "${notes[@]}"; do
+		escaped_collated_notes="${escaped_collated_notes}${note}\n"
+	done
+	escaped_collated_notes="$(escape "${escaped_collated_notes}")"
 	escaped_collated_import_errors=""
 	for import_error in "${import_errors[@]}"; do
 		escaped_collated_import_errors="${escaped_collated_import_errors}${import_error}\n"
@@ -266,7 +272,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 		escaped_collated_import_warnings="${escaped_collated_import_warnings}${import_warning}\n"
 	done
 	escaped_collated_import_warnings="$(escape "${escaped_collated_import_warnings}")"
-	escaped_collated_compile_errors=""
+	escaped_collated_compile_errors="$(escape "${compile_errors}")"
 	row="${escaped_student_id},${escaped_collated_notes},${escaped_collated_import_errors},${escaped_collated_import_warnings},${escaped_collated_compile_errors}"
 	for index in "${!test_names[@]}"; do
 		row="${row},$(escape "${tests_passed[${index}]}"),$(escape "${test_fail_reason[${index}]}")"
@@ -276,4 +282,4 @@ done
 
 # Clean up
 echo "Cleaning up..."
-rm -rf "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${CLEAN_UNZIPPED}"
+rm -rf "${ZIPPED}" "${UNCLEAN_UNZIPPED}" 
