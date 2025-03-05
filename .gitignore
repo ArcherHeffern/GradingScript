@@ -5,5 +5,5 @@ zipped/*
 .DS_Store
 *.zip
 Test2.java
-results.csv
+results*.csv
 test.sh

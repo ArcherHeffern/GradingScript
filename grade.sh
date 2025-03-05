@@ -145,8 +145,11 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 		ok=true
 		student_submission_unzipped_clean="${CLEAN_UNZIPPED}${student_id}/"
 		for PROJECT_CLASS in "${PROJECT_CLASSES[@]}"; do
+			clean_dest="${student_submission_unzipped_clean}${PROJECT_CLASS}"
+			package="$(dirname "${PROJECT_CLASS}")"
 			mapfile -t project_class_unclean_location < <("${FD_CMD}" -Ipt file "${PROJECT_CLASS}" "${student_submission_unzipped_unclean}")
 			num_file_matches="${#project_class_unclean_location[@]}"
+
 			if [[ "${num_file_matches}" -gt 1 ]];
 			then
 				import_errors+=("Too many files matching ${PROJECT_CLASS}.")
@@ -169,24 +172,20 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 					ok=false
 					break
 				fi
-				to_coerce="${project_class_unclean_location[0]}"
-				import_warnings+=("Coerced ${to_coerce} to ${PROJECT_CLASS}")
-				package="$(dirname "${PROJECT_CLASS}")"
-				if sed -r 's/\s*package.*//' "${to_coerce}" | sed "1i package ${package};" > "${to_coerce}.tmp"; then
-					mv "${to_coerce}.tmp" "${to_coerce}"
-				else
-					import_errors+=("Found matching file \'${to_coerce}\' but failed to coerce.")
-					ok=false
-					break
+				import_warnings+=("Coerced ${project_class_unclean_location[0]} to ${PROJECT_CLASS}")
+			else
+				# Verify in right package and contains package declaration at top
+				if ! grep -lP "^\s*package\s+${package}\s*;\s*$" "${project_class_unclean_location}" &> /dev/null; then
+					import_warnings+=("${PROJECT_CLASS} found in correct location but missing proper package declaration")
 				fi
 			fi 
-			clean_dest="${student_submission_unzipped_clean}${PROJECT_CLASS}"
 			mkdir -p "$(dirname "${clean_dest}")"
-			if ! mv "${project_class_unclean_location[0]}" "${clean_dest}"; then
-				import_errors+=("Failed to move \'${project_class_unclean_location[0]}\' to \'${clean_dest}\'.")
+			if ! sed -r 's/\s*package.*//' "${project_class_unclean_location[0]}" | sed "1i package ${package};" > "${clean_dest}"; then
+				import_errors+=("Failed to coerce and move \'${project_class_unclean_location[0]}\' to \'${clean_dest}\'.")
 				ok=false
 				break
 			fi
+			rm "${project_class_unclean_location[0]}"
 		done
 		if ! $ok; then
 			break
@@ -277,7 +276,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 		row="${row},$(escape "${test_passed}"),$(escape "${fail_reason}")"
 	done
 
-	if [[ "${#test_names[@]}" -eq 0 ]]; then
+	if [[ "${#test_names[@]}" -eq 0 && $SELECT_STUDENT != true ]]; then
 		waiting_to_write+=("${row}")
 	else
 		for deferred_row in "${waiting_to_write[@]}"; do # !Untested. Triggers if first student doesn't pass all tests
