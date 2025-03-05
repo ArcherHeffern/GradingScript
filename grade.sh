@@ -11,6 +11,7 @@ set -euo pipefail
 # - Seperate test output and this program output 
 # - Paralellize with GNU Parallel
 # - Locale error: Student has name with unicode character :(
+# - Defer writing to file until we know how many tests there are
 
 if command -v fd >/dev/null 2>&1; then
     FD_CMD="fd"
@@ -54,15 +55,18 @@ then
 	exit 1
 fi
 
+# ============
 # Globals: All paths should be relative to this executable
-ZIPPED="zipped/"
-UNCLEAN_UNZIPPED="unclean_unzipped/"
-CLEAN_UNZIPPED="clean_unzipped/"
+# ============
+# - Configurable Constants
 RESULTS="results.csv"
 TEST_CLASS="Test2.java" # Cannot have multiple periods. java -cp... depends on this!
 TEST_CLASS_DEST="main/"
 PROJECT_CLASSES=("main/PCB.java" "main/ProcessManager.java" "main/Queue.java")
-EXPECTED_OUTPUT="expected.txt" # Not used
+# - Internal Constants
+UNCLEAN_UNZIPPED="unclean_unzipped/"
+CLEAN_UNZIPPED="clean_unzipped/"
+ZIPPED="zipped/"
 MOODLE_SUBMISSION_EXTENSION="_assignsubmission_file"
 
 if [[ ! -f "${TEST_CLASS}" ]]; 
@@ -94,22 +98,23 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 	echo "=== Running ${student_id}'s submission ==="
 	for _ in "0"; do
 		# ============
-		# Unzip submission and place in $UNCLEAN_UNZIPPED/$student_id
+		# Import Project
 		# ============
+		# - Unzip submission and place in $UNCLEAN_UNZIPPED/$student_id
 		mapfile -t student_submissions < <("${FD_CMD}" -I -e 'zip' . "${student_submission_group}")
 		if [[ "${#student_submissions[@]}" -gt 1 ]]; then
-			echo "Multiple submissions found. Skipping..." 
-			continue
+			import_errors+=('Multiple submissions found. Skipping...')
+			break
 		elif [[ "${#student_submissions[@]}" -lt 1 ]]; then
-			echo "No submission found. Skipping..." 
-			continue
+			import_errors+=('No submission found. Skipping...')
+			break
 		fi
 
 		student_submission_zipped="${student_submissions[0]}"
 		student_submission_unzipped_unclean="${UNCLEAN_UNZIPPED}${student_id}/"
 		if ! unzip -q "${student_submission_zipped}" -d "${student_submission_unzipped_unclean}";
 		then
-			echo "Failed to unzip ${student_submission_zipped}"
+			import_errors+=("Failed to unzip ${student_submission_zipped}")
 			continue
 		fi
 
@@ -126,35 +131,33 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			num_file_matches="${#project_class_unclean_location[@]}"
 			if [[ "${num_file_matches}" -gt 1 ]];
 			then
-				echo "Too many files matching ${PROJECT_CLASS}. Skipping..."
+				import_errors+=("Too many files matching ${PROJECT_CLASS}.")
 				ok=false
 				break
 			elif [[ "${num_file_matches}" -lt 1 ]];
 			then
-				echo "No files matching ${PROJECT_CLASS}. Attempting coersion..."
-
 				# Attempted coersion of file into correct package. If this fails not my problem
 				# Changes package of a file matching basename ${PROJECT_CLASS} to expected package in-place
 				mapfile -t project_class_unclean_location < <("${FD_CMD}" -Ipt file "$(basename "${PROJECT_CLASS}")" "${student_submission_unzipped_unclean}")
 				num_file_matches="${#project_class_unclean_location[@]}"
 				if [[ "${num_file_matches}" -gt 1 ]];
 				then
-					echo "Too many files matching $(basename ${PROJECT_CLASS}). Skipping..."
+					import_errors+=("Too many files matching $(basename ${PROJECT_CLASS}).")
 					ok=false
 					break
 				elif [[ "${num_file_matches}" -lt 1 ]];
 				then
-					echo "No files matching $(basename ${PROJECT_CLASS}). Skipping..."
+					import_errors+=("No files matching $(basename ${PROJECT_CLASS}).")
 					ok=false
 					break
 				fi
 				to_coerce="${project_class_unclean_location[0]}"
+				import_warnings+=("Coerced ${to_coerce} to ${PROJECT_CLASS}")
 				package="$(dirname "${PROJECT_CLASS}")"
 				if sed -r 's/\s*package.*//' "${to_coerce}" | sed "1i package ${package};" > "${to_coerce}.tmp"; then
 					mv "${to_coerce}.tmp" "${to_coerce}"
-					echo "Successfully coerced"
 				else
-					echo "Failed to coerce"
+					import_errors+=("Found matching file \'${to_coerce}\' but failed to coerce.")
 					ok=false
 					break
 				fi
@@ -162,19 +165,21 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			clean_dest="${student_submission_unzipped_clean}${PROJECT_CLASS}"
 			mkdir -p "$(dirname "${clean_dest}")"
 			if ! mv "${project_class_unclean_location[0]}" "${clean_dest}"; then
-				echo "Failed to move ${project_class_unclean_location[0]} to ${clean_dest}. Skipping..."
+				import_errors+=("Failed to move \'${project_class_unclean_location[0]}\' to \'${clean_dest}\'.")
 				ok=false
 				break
 			fi
 		done
 		if ! $ok; then
-			continue
+			break
 		fi
+
+		continue
 
 		test_file_dest_dir="${student_submission_unzipped_clean}${TEST_CLASS_DEST}"
 		mkdir -p "${test_file_dest_dir}"
 		if ! cp "$(realpath "${TEST_CLASS}")" "${test_file_dest_dir}${TEST_CLASS}"; then
-			echo "Failed to copy $(realpath ${TEST_CLASS}) to ${test_file_dest_dir}${TEST_CLASS}. Skipping..."
+			import_errors+=("Failed to copy \'$(realpath ${TEST_CLASS})\' to \'${test_file_dest_dir}${TEST_CLASS}\'.")
 			continue
 		fi
 
@@ -214,7 +219,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 	if [[ ${first_submission} = true && ${#test_names[@]} -gt 0 ]]; then
 		# Write header
 		first_submission=false
-		header="notes,import errors,import warnings,compile errors"
+		header="student_id,notes,import errors,import warnings,compile errors"
 		for test_name in "${test_names[@]}"; do
 			header="${header},$(escape "${test_name} passed"),$(escape "${test_name} fail reason")"
 		done
@@ -224,15 +229,24 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			sed -i "1i ${header}" "${RESULTS}"
 		fi
 	fi
+	escaped_student_id="$(escape "${student_id}")"
 	escaped_collated_notes=""
 	escaped_collated_import_errors=""
+	for import_error in "${import_errors[@]}"; do
+		escaped_collated_import_errors="${escaped_collated_import_errors}${import_error}\n"
+	done
+	escaped_collated_import_errors="$(escape "${escaped_collated_import_errors}")"
 	escaped_collated_import_warnings=""
+	for import_warning in "${import_warnings[@]}"; do
+		escaped_collated_import_warnings="${escaped_collated_import_warnings}${import_warning}\n"
+	done
+	escaped_collated_import_warnings="$(escape "${escaped_collated_import_warnings}")"
 	escaped_collated_compile_errors=""
-	row="${escaped_collated_notes},${escaped_collated_import_errors},${escaped_collated_import_warnings},${escaped_collated_compile_errors}"
+	row="${escaped_student_id},${escaped_collated_notes},${escaped_collated_import_errors},${escaped_collated_import_warnings},${escaped_collated_compile_errors}"
 	for index in "${!test_names[@]}"; do
 		row="${row},$(escape "${tests_passed[${index}]}"),$(escape "${test_fail_reason[${index}]}")"
 	done
-	echo "${row}" >> "${RESULTS}"
+	echo -e "${row}" >> "${RESULTS}"
 done
 
 # Clean up
