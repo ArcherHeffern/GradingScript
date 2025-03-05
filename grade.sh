@@ -157,7 +157,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 				break
 			elif [[ "${num_file_matches}" -lt 1 ]];
 			then
-				# Attempted coersion of file into correct package. If this fails not my problem
+				# Attempted coercion of file into correct package. If this fails not my problem
 				# Changes package of a file matching basename ${PROJECT_CLASS} to expected package in-place
 				mapfile -t project_class_unclean_location < <("${FD_CMD}" -Ipt file "$(basename "${PROJECT_CLASS}")" "${student_submission_unzipped_unclean}")
 				num_file_matches="${#project_class_unclean_location[@]}"
@@ -172,6 +172,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 					ok=false
 					break
 				fi
+				# TODO: Remove ${student_submission_unzipped_unclean} from front of ${project_class_unclean_location[0]}
 				import_warnings+=("Coerced ${project_class_unclean_location[0]} to ${PROJECT_CLASS}")
 			else
 				# Verify in right package and contains package declaration at top
