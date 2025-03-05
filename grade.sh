@@ -93,10 +93,7 @@ mapfile -t student_submission_groups < <("${FD_CMD}" -I -t directory "${MOODLE_S
 if [[ $SELECT_STUDENT = true ]]; then
 	mapfile -t student_ids < <( \
 		unzip -l "${INPUT_ZIPFILE}" \
-		| tail -n+4 \
-		| head -n-2 \
-		| awk '{print $6 " " $7}' \
-		| cut -d'/' -f2 \
+		| grep -Po '[a-zA-Z ]*_\d+_assignsubmission_file' \
 		| cut -d'_' -f1 \
 		| sort \
 		| uniq \
