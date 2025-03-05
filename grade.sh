@@ -2,16 +2,10 @@
 
 set -euo pipefail 
 
-# Terminology
-# - Aborting: Ending the program due to critical error
-# - Skipping: Skipping a student due to student specific error
-
 # TODO
 # - Support comparing student output with expected output and saving as diff
-# - Seperate test output and this program output 
 # - Paralellize with GNU Parallel
 # - Locale error: Student has name with unicode character :(
-# - Defer writing to file until we know how many tests there are
 
 if command -v fd >/dev/null 2>&1; then
     FD_CMD="fd"
@@ -106,7 +100,8 @@ if [[ $SELECT_STUDENT = true ]]; then
 
 fi
 
-first_submission=true
+test_names=()
+waiting_to_write=()
 for student_submission_group in "${student_submission_groups[@]}"; do
 	student_id="$(echo $(basename "${student_submission_group}") | cut -d'_' -f1)"
 	if [[ "${SELECT_STUDENT}" = true && "${student_id}" != "${SELECTED_STUDENT}" ]]; then
@@ -116,7 +111,6 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 	import_errors=()
 	import_warnings=()
 	compile_errors=""
-	test_names=()
 	tests_passed=()
 	test_fail_reason=()
 	echo "=== Running ${student_id}'s submission ==="
@@ -219,7 +213,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			|| true
 		} 2>&1 > /dev/null | tail -n+3 | head -n-2
 		)"
-		if [[ "${#output}" -ne 0 ]]; then # scary!
+		if [[ "${#output}" -ne 0 ]]; then # !scary!
 			compile_errors="${output}"
 			continue
 		fi
@@ -236,26 +230,25 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			continue
 		fi
 		# Parse Results
-		mapfile -t test_names < <(jq -r '.[].name' "${student_submission_unzipped_clean}${results_dest}")
+		if [[ "${#test_names[@]}" -eq 0 ]]; then
+			mapfile -t test_names < <(jq -r '.[].name' "${student_submission_unzipped_clean}${results_dest}")
+			# Write header
+			header="student_id,notes,import errors,import warnings,compile errors"
+			for test_name in "${test_names[@]}"; do
+				header="${header},$(escape "${test_name} passed"),$(escape "${test_name} fail reason")"
+			done
+			if [[ ! -s "${RESULTS}" ]]; then
+				echo "${header}" > "${RESULTS}"
+			else
+				sed -i "1i ${header}" "${RESULTS}"
+			fi
+		fi
 		mapfile -t tests_passed < <(jq -r '.[].pass' "${student_submission_unzipped_clean}${results_dest}")
 		mapfile -t test_fail_reason < <(jq -r '.[].reason' "${student_submission_unzipped_clean}${results_dest}")
 	done
 	# ============
 	# Write results to csv
 	# ============
-	if [[ ${first_submission} = true && ${#test_names[@]} -gt 0 ]]; then
-		# Write header
-		first_submission=false
-		header="student_id,notes,import errors,import warnings,compile errors"
-		for test_name in "${test_names[@]}"; do
-			header="${header},$(escape "${test_name} passed"),$(escape "${test_name} fail reason")"
-		done
-		if [[ ! -s "${RESULTS}" ]]; then
-			echo "${header}" > "${RESULTS}"
-		else
-			sed -i "1i ${header}" "${RESULTS}"
-		fi
-	fi
 	escaped_student_id="$(escape "${student_id}")"
 	escaped_collated_notes=""
 	for note in "${notes[@]}"; do
@@ -275,9 +268,28 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 	escaped_collated_compile_errors="$(escape "${compile_errors}")"
 	row="${escaped_student_id},${escaped_collated_notes},${escaped_collated_import_errors},${escaped_collated_import_warnings},${escaped_collated_compile_errors}"
 	for index in "${!test_names[@]}"; do
-		row="${row},$(escape "${tests_passed[${index}]}"),$(escape "${test_fail_reason[${index}]}")"
+		test_passed="false"
+		fail_reason=""
+		if [[ "${#tests_passed[@]}" -gt 0 ]]; then
+			test_passed="${tests_passed[${index}]}"
+			fail_reason="${test_fail_reason[${index}]}"
+		fi
+		row="${row},$(escape "${test_passed}"),$(escape "${fail_reason}")"
 	done
-	echo -e "${row}" >> "${RESULTS}"
+
+	if [[ "${#test_names[@]}" -eq 0 ]]; then
+		waiting_to_write+=("${row}")
+	else
+		for deferred_row in "${waiting_to_write[@]}"; do # !Untested. Triggers if first student doesn't pass all tests
+			for index in "${!test_names[@]}"; do
+				deferred_row="${deferred_row},\"false\",\"\""
+			done
+			echo -e "${deferred_row}" >> "${RESULTS}"
+		done
+		deferred_row=()
+		echo -e "${row}" >> "${RESULTS}"
+	fi
+
 done
 
 # Clean up
