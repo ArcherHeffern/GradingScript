@@ -49,7 +49,7 @@ fi
 ZIPPED="zipped/"
 UNCLEAN_UNZIPPED="unclean_unzipped/"
 CLEAN_UNZIPPED="clean_unzipped/"
-RESULTS="results/"
+RESULTS="results.csv"
 TEST_CLASS="Test2.java" # Cannot have multiple periods. java -cp... depends on this!
 TEST_CLASS_DEST="main/"
 PROJECT_CLASSES=("main/PCB.java" "main/ProcessManager.java" "main/Queue.java")
@@ -65,16 +65,6 @@ fi
 # Reset: Remove $ZIPPED, $UNZIPPED, and $RESULTS
 rm -rf   "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${CLEAN_UNZIPPED}" "${RESULTS}"
 mkdir -p "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${CLEAN_UNZIPPED}" "${RESULTS}"
-
-# Post processing of variables - Don't touch!
-RESULTS="$(realpath "${RESULTS}")/"
-if [[ $? -ne 0 ]]; then
-	echo "Failed to find realpath of ${RESULTS}"
-fi
-TEST_CLASS_ABS_PATH="$(realpath "${TEST_CLASS}")"
-if [[ $? -ne 0 ]]; then
-	echo "Failed to find realpath of ${TEST_CLASS}"
-fi
 
 # Unzip all moodle zipfile
 unzip "${INPUT_ZIPFILE}" -d "${ZIPPED}" > /dev/null
@@ -115,50 +105,59 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 	ok=true
 	student_submission_unzipped_clean="${CLEAN_UNZIPPED}${student_id}/"
 	for PROJECT_CLASS in "${PROJECT_CLASSES[@]}"; do
-		mapfile -t project_class_unclean_location < <("${FD_CMD}" -Ipt file "${PROJECT_CLASS}" "${student_submission_unzipped_unclean}")
-		num_file_matches="${#project_class_unclean_location[@]}"
-		if [[ "${num_file_matches}" -gt 1 ]];
-		then
-			echo "Too many files matching ${PROJECT_CLASS}. Skipping..."
-			ok=false
-			break
-		elif [[ "${num_file_matches}" -lt 1 ]];
-		then
-			echo "No files matching ${PROJECT_CLASS}. Attempting coersion..."
-
-			# Attempted coersion of file into correct package. If this fails not my problem
-			# Changes package of a file matching basename ${PROJECT_CLASS} to expected package in-place
-			mapfile -t project_class_unclean_location < <("${FD_CMD}" -Ipt file "$(basename "${PROJECT_CLASS}")" "${student_submission_unzipped_unclean}")
+		import_errors=()
+		import_warnings=()
+		compile_errors=()
+		test_names=()
+		tests_passed=()
+		test_reasons=()
+		for _ in "0"; do
+			mapfile -t project_class_unclean_location < <("${FD_CMD}" -Ipt file "${PROJECT_CLASS}" "${student_submission_unzipped_unclean}")
 			num_file_matches="${#project_class_unclean_location[@]}"
 			if [[ "${num_file_matches}" -gt 1 ]];
 			then
-				echo "Too many files matching $(basename ${PROJECT_CLASS}). Skipping..."
+				echo "Too many files matching ${PROJECT_CLASS}. Skipping..."
 				ok=false
 				break
 			elif [[ "${num_file_matches}" -lt 1 ]];
 			then
-				echo "No files matching $(basename ${PROJECT_CLASS}). Skipping..."
+				echo "No files matching ${PROJECT_CLASS}. Attempting coersion..."
+
+				# Attempted coersion of file into correct package. If this fails not my problem
+				# Changes package of a file matching basename ${PROJECT_CLASS} to expected package in-place
+				mapfile -t project_class_unclean_location < <("${FD_CMD}" -Ipt file "$(basename "${PROJECT_CLASS}")" "${student_submission_unzipped_unclean}")
+				num_file_matches="${#project_class_unclean_location[@]}"
+				if [[ "${num_file_matches}" -gt 1 ]];
+				then
+					echo "Too many files matching $(basename ${PROJECT_CLASS}). Skipping..."
+					ok=false
+					break
+				elif [[ "${num_file_matches}" -lt 1 ]];
+				then
+					echo "No files matching $(basename ${PROJECT_CLASS}). Skipping..."
+					ok=false
+					break
+				fi
+				to_coerce="${project_class_unclean_location[0]}"
+				package="$(dirname "${PROJECT_CLASS}")"
+				if sed -r 's/\s*package.*//' "${to_coerce}" | sed "1i package ${package};" > "${to_coerce}.tmp"; then
+					mv "${to_coerce}.tmp" "${to_coerce}"
+					echo "Successfully coerced"
+				else
+					echo "Failed to coerce"
+					ok=false
+					break
+				fi
+			fi 
+			clean_dest="${student_submission_unzipped_clean}${PROJECT_CLASS}"
+			mkdir -p "$(dirname "${clean_dest}")"
+			if ! mv "${project_class_unclean_location[0]}" "${clean_dest}"; then
+				echo "Failed to move ${project_class_unclean_location[0]} to ${clean_dest}. Skipping..."
 				ok=false
 				break
 			fi
-			to_coerce="${project_class_unclean_location[0]}"
-			package="$(dirname "${PROJECT_CLASS}")"
-			if sed -r 's/\s*package.*//' "${to_coerce}" | sed "1i package ${package};" > "${to_coerce}.tmp"; then
-				mv "${to_coerce}.tmp" "${to_coerce}"
-				echo "Successfully coerced"
-			else
-				echo "Failed to coerce"
-				ok=false
-				break
-			fi
-		fi 
-		clean_dest="${student_submission_unzipped_clean}${PROJECT_CLASS}"
-		mkdir -p "$(dirname "${clean_dest}")"
-		if ! mv "${project_class_unclean_location[0]}" "${clean_dest}"; then
-			echo "Failed to move ${project_class_unclean_location[0]} to ${clean_dest}. Skipping..."
-			ok=false
-			break
-		fi
+		done
+		# Write results to csv
 	done
 	if ! $ok; then
 		continue
@@ -166,8 +165,8 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 
 	test_file_dest_dir="${student_submission_unzipped_clean}${TEST_CLASS_DEST}"
 	mkdir -p "${test_file_dest_dir}"
-	if ! cp "${TEST_CLASS_ABS_PATH}" "${test_file_dest_dir}${TEST_CLASS}"; then
-		echo "Failed to copy ${TEST_CLASS_ABS_PATH} to ${test_file_dest_dir}${TEST_CLASS}. Skipping..."
+	if ! cp "$(realpath "${TEST_CLASS}")" "${test_file_dest_dir}${TEST_CLASS}"; then
+		echo "Failed to copy $(realpath ${TEST_CLASS}) to ${test_file_dest_dir}${TEST_CLASS}. Skipping..."
 		continue
 	fi
 
