@@ -21,7 +21,7 @@ else
     exit 1
 fi
 
-DEPENDENCIES=('firejail' 'zip')
+DEPENDENCIES=('firejail' 'zip' 'jq')
 for DEPENDENCY in "${DEPENDENCIES[@]}"; do
 	if ! command -v "${DEPENDENCY}" > /dev/null 2>&1; then
 		echo >&2 "Script requires '${DEPENDENCY}' but isn't installed. Aborting."
@@ -29,6 +29,15 @@ for DEPENDENCY in "${DEPENDENCIES[@]}"; do
 	fi
 done
 
+function escape {
+	# Escapes a line according to csv format
+	# Replaces each double quote with two double quotes and double quotes the line
+	# eg. 'he"l"o' -> '"he""l""o"'
+	# Usage: escape '<string>'
+	unquoted="${1}"
+	quoted="$(echo "${unquoted}" | sed 's/"/""/g')"
+	echo "\"${quoted}\""
+}
 
 # Process arguments
 
@@ -64,7 +73,7 @@ fi
 
 # Reset: Remove $ZIPPED, $UNZIPPED, and $RESULTS
 rm -rf   "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${CLEAN_UNZIPPED}" "${RESULTS}"
-mkdir -p "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${CLEAN_UNZIPPED}" "${RESULTS}"
+mkdir -p "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${CLEAN_UNZIPPED}" 
 
 # Unzip all moodle zipfile
 unzip "${INPUT_ZIPFILE}" -d "${ZIPPED}" > /dev/null
@@ -72,46 +81,47 @@ unzip "${INPUT_ZIPFILE}" -d "${ZIPPED}" > /dev/null
 # Process all submissions
 mapfile -t student_submission_groups < <("${FD_CMD}" -I -t directory "${MOODLE_SUBMISSION_EXTENSION}$" "${ZIPPED}")
 
+first_submission=true
 for student_submission_group in "${student_submission_groups[@]}"; do
 	student_id="$(echo $(basename "${student_submission_group}") | cut -d'_' -f1)"
+	notes=()
+	import_errors=()
+	import_warnings=()
+	compile_errors=()
+	test_names=()
+	tests_passed=()
+	test_fail_reason=()
 	echo "=== Running ${student_id}'s submission ==="
+	for _ in "0"; do
+		# ============
+		# Unzip submission and place in $UNCLEAN_UNZIPPED/$student_id
+		# ============
+		mapfile -t student_submissions < <("${FD_CMD}" -I -e 'zip' . "${student_submission_group}")
+		if [[ "${#student_submissions[@]}" -gt 1 ]]; then
+			echo "Multiple submissions found. Skipping..." 
+			continue
+		elif [[ "${#student_submissions[@]}" -lt 1 ]]; then
+			echo "No submission found. Skipping..." 
+			continue
+		fi
 
-	# ============
-	# Unzip submission and place in $UNCLEAN_UNZIPPED/$student_id
-	# ============
-	mapfile -t student_submissions < <("${FD_CMD}" -I -e 'zip' . "${student_submission_group}")
-	if [[ "${#student_submissions[@]}" -gt 1 ]]; then
-		echo "Multiple submissions found. Skipping..." 
-		continue
-	elif [[ "${#student_submissions[@]}" -lt 1 ]]; then
-		echo "No submission found. Skipping..." 
-		continue
-	fi
+		student_submission_zipped="${student_submissions[0]}"
+		student_submission_unzipped_unclean="${UNCLEAN_UNZIPPED}${student_id}/"
+		if ! unzip -q "${student_submission_zipped}" -d "${student_submission_unzipped_unclean}";
+		then
+			echo "Failed to unzip ${student_submission_zipped}"
+			continue
+		fi
 
-	student_submission_zipped="${student_submissions[0]}"
-	student_submission_unzipped_unclean="${UNCLEAN_UNZIPPED}${student_id}/"
-	if ! unzip -q "${student_submission_zipped}" -d "${student_submission_unzipped_unclean}";
-	then
-		echo "Failed to unzip ${student_submission_zipped}"
-		continue
-	fi
-
-	# ============
-	# Submission Cleaning and Setup
-	# ============
-	# - Verify script contains all $PROJECT_CLASSES
-	# - Move all project classes to $CLEAN_UNZIPPED/$student_id
-	# - copy $TEST_CLASS to $CLEAN_UNZIPPED/$student_id/$TEST_CLASS_DEST/$TEST_CLASS
-	ok=true
-	student_submission_unzipped_clean="${CLEAN_UNZIPPED}${student_id}/"
-	for PROJECT_CLASS in "${PROJECT_CLASSES[@]}"; do
-		import_errors=()
-		import_warnings=()
-		compile_errors=()
-		test_names=()
-		tests_passed=()
-		test_reasons=()
-		for _ in "0"; do
+		# ============
+		# Submission Cleaning and Setup
+		# ============
+		# - Verify script contains all $PROJECT_CLASSES
+		# - Move all project classes to $CLEAN_UNZIPPED/$student_id
+		# - copy $TEST_CLASS to $CLEAN_UNZIPPED/$student_id/$TEST_CLASS_DEST/$TEST_CLASS
+		ok=true
+		student_submission_unzipped_clean="${CLEAN_UNZIPPED}${student_id}/"
+		for PROJECT_CLASS in "${PROJECT_CLASSES[@]}"; do
 			mapfile -t project_class_unclean_location < <("${FD_CMD}" -Ipt file "${PROJECT_CLASS}" "${student_submission_unzipped_unclean}")
 			num_file_matches="${#project_class_unclean_location[@]}"
 			if [[ "${num_file_matches}" -gt 1 ]];
@@ -157,44 +167,66 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 				break
 			fi
 		done
-		# Write results to csv
+		if ! $ok; then
+			continue
+		fi
+
+		test_file_dest_dir="${student_submission_unzipped_clean}${TEST_CLASS_DEST}"
+		mkdir -p "${test_file_dest_dir}"
+		if ! cp "$(realpath "${TEST_CLASS}")" "${test_file_dest_dir}${TEST_CLASS}"; then
+			echo "Failed to copy $(realpath ${TEST_CLASS}) to ${test_file_dest_dir}${TEST_CLASS}. Skipping..."
+			continue
+		fi
+
+		# ============
+		# Compile and Run Program Securely
+		# ============
+		# Writes results to a random file named during runtime HAHA!
+		if ! firejail \
+			--noprofile \
+			--read-only=/ \
+			--private-cwd="$(realpath "${student_submission_unzipped_clean}")" \
+			--whitelist="$(realpath "${student_submission_unzipped_clean}")" \
+			javac "${TEST_CLASS_DEST}${TEST_CLASS}" "${PROJECT_CLASSES[@]}" 
+		then
+			echo "Failed to compile ${student_id}'s submission"
+			continue
+		fi
+		results_dest="results_${RANDOM}.json"
+		if ! firejail \
+			--noprofile \
+			--read-only=/ \
+			--private-cwd="$(realpath "${student_submission_unzipped_clean}")" \
+			--whitelist="$(realpath "${student_submission_unzipped_clean}")" \
+			java -cp "$(realpath "${student_submission_unzipped_clean}")" "$(echo "${TEST_CLASS_DEST}${TEST_CLASS}" | cut -d'.' -f1)" -- "${results_dest}" > /dev/null
+		then
+			echo "Failed to run ${student_id}'s submission"
+			continue
+		fi
+		# Parse Results
+		mapfile -t test_names < <(jq -r '.[].name' "${student_submission_unzipped_clean}${results_dest}")
+		mapfile -t tests_passed < <(jq -r '.[].pass' "${student_submission_unzipped_clean}${results_dest}")
+		mapfile -t test_fail_reason < <(jq -r '.[].reason' "${student_submission_unzipped_clean}${results_dest}")
 	done
-	if ! $ok; then
-		continue
-	fi
-
-	test_file_dest_dir="${student_submission_unzipped_clean}${TEST_CLASS_DEST}"
-	mkdir -p "${test_file_dest_dir}"
-	if ! cp "$(realpath "${TEST_CLASS}")" "${test_file_dest_dir}${TEST_CLASS}"; then
-		echo "Failed to copy $(realpath ${TEST_CLASS}) to ${test_file_dest_dir}${TEST_CLASS}. Skipping..."
-		continue
-	fi
-
 	# ============
-	# Compile and Run Program Securely
+	# Write results to csv
 	# ============
-	# Writes results to a file named during runtime HAHA!
-	if ! firejail \
-		--noprofile \
-		--read-only=/ \
-		--private-cwd="$(realpath "${student_submission_unzipped_clean}")" \
-		--whitelist="$(realpath "${student_submission_unzipped_clean}")" \
-		javac "${TEST_CLASS_DEST}${TEST_CLASS}" "${PROJECT_CLASSES[@]}" 
-	then
-		echo "Failed to compile ${student_id}'s submission"
-		continue
+	if [[ ${first_submission} && ${#test_names[@]} -gt 0 ]]; then
+		# Write header
+		first_submission=false
+		header="notes,import errors,import warnings,compile errors"
+		for test_name in "${test_names[@]}"; do
+			header="${header},$(escape "${test_name} passed"),$(escape "${test_name} fail reason")"
+		done
+		if [[ ! -s "${RESULTS}" ]]; then
+			echo "${header}" > "${RESULTS}"
+		else
+			sed -i "1i ${header}" "${RESULTS}"
+		fi
 	fi
-	results_dest="results_${RANDOM}.json"
-	if ! firejail \
-		--noprofile \
-		--read-only=/ \
-		--private-cwd="$(realpath "${student_submission_unzipped_clean}")" \
-		--whitelist="$(realpath "${student_submission_unzipped_clean}")" \
-		java -cp "$(realpath "${student_submission_unzipped_clean}")" "$(echo "${TEST_CLASS_DEST}${TEST_CLASS}" | cut -d'.' -f1)" -- "${results_dest}" > /dev/null
-	then
-		echo "Failed to run ${student_id}'s submission"
-		continue
-	fi
+	exit 0
+	row=""
+	echo >> "${RESULTS}"
 done
 
 # Clean up
