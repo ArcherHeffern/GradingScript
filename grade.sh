@@ -211,7 +211,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 	# ============
 	# Write results to csv
 	# ============
-	if [[ ${first_submission} && ${#test_names[@]} -gt 0 ]]; then
+	if [[ ${first_submission} = true && ${#test_names[@]} -gt 0 ]]; then
 		# Write header
 		first_submission=false
 		header="notes,import errors,import warnings,compile errors"
@@ -224,9 +224,15 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			sed -i "1i ${header}" "${RESULTS}"
 		fi
 	fi
-	exit 0
-	row=""
-	echo >> "${RESULTS}"
+	escaped_collated_notes=""
+	escaped_collated_import_errors=""
+	escaped_collated_import_warnings=""
+	escaped_collated_compile_errors=""
+	row="${escaped_collated_notes},${escaped_collated_import_errors},${escaped_collated_import_warnings},${escaped_collated_compile_errors}"
+	for index in "${!test_names[@]}"; do
+		row="${row},$(escape "${tests_passed[${index}]}"),$(escape "${test_fail_reason[${index}]}")"
+	done
+	echo "${row}" >> "${RESULTS}"
 done
 
 # Clean up
