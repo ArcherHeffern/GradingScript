@@ -22,7 +22,7 @@ else
     exit 1
 fi
 
-DEPENDENCIES=('firejail' 'zip' 'jq')
+DEPENDENCIES=('firejail' 'zip' 'jq' 'fzf')
 for DEPENDENCY in "${DEPENDENCIES[@]}"; do
 	if ! command -v "${DEPENDENCY}" > /dev/null 2>&1; then
 		echo >&2 "Script requires '${DEPENDENCY}' but isn't installed. Aborting."
@@ -40,19 +40,24 @@ function escape {
 	echo "\"${quoted}\""
 }
 
+# ============
 # Process arguments
-
+# ============
 INPUT_ZIPFILE="${1-}"
-if [[ -z "${INPUT_ZIPFILE}" ]];
-then
-	echo "Usage: ${0} submissions_zipfile"
+SELECT_STUDENT=false
+
+if [[ -z "${INPUT_ZIPFILE}" ]]; then
+	echo "Usage: ${0} submissions_zipfile [-s]"
 	exit 1
 fi 
 
-if [[ ! -f "${INPUT_ZIPFILE}" ]];
-then 
+if [[ ! -f "${INPUT_ZIPFILE}" ]]; then 
 	echo "Error: ${INPUT_ZIPFILE} does not exist"
 	exit 1
+fi
+
+if [[ "${2-}" = "-s" ]]; then
+	SELECT_STUDENT=true
 fi
 
 # ============
@@ -85,9 +90,31 @@ unzip "${INPUT_ZIPFILE}" -d "${ZIPPED}" > /dev/null
 # Process all submissions
 mapfile -t student_submission_groups < <("${FD_CMD}" -I -t directory "${MOODLE_SUBMISSION_EXTENSION}$" "${ZIPPED}")
 
+if [[ $SELECT_STUDENT = true ]]; then
+	mapfile -t student_ids < <( \
+		unzip -l "${INPUT_ZIPFILE}" \
+		| tail -n+4 \
+		| head -n-2 \
+		| awk '{print $6 " " $7}' \
+		| cut -d'/' -f2 \
+		| cut -d'_' -f1 \
+		| sort \
+		| uniq \
+	)
+	SELECTED_STUDENT="$(printf "%s\n" "${student_ids[@]}" | fzf)"
+	if [[ $? -ne 0 ]]; then
+		echo 2> "No student selected. Exiting..."
+		exit 0
+	fi
+
+fi
+
 first_submission=true
 for student_submission_group in "${student_submission_groups[@]}"; do
 	student_id="$(echo $(basename "${student_submission_group}") | cut -d'_' -f1)"
+	if [[ "${SELECT_STUDENT}" = true && "${student_id}" != "${SELECTED_STUDENT}" ]]; then
+		continue
+	fi
 	notes=()
 	import_errors=()
 	import_warnings=()
@@ -174,8 +201,6 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			break
 		fi
 
-		continue
-
 		test_file_dest_dir="${student_submission_unzipped_clean}${TEST_CLASS_DEST}"
 		mkdir -p "${test_file_dest_dir}"
 		if ! cp "$(realpath "${TEST_CLASS}")" "${test_file_dest_dir}${TEST_CLASS}"; then
@@ -197,6 +222,9 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			echo "Failed to compile ${student_id}'s submission"
 			continue
 		fi
+
+		continue
+
 		results_dest="results_${RANDOM}.json"
 		if ! firejail \
 			--noprofile \
