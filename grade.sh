@@ -39,9 +39,10 @@ function escape {
 # ============
 INPUT_ZIPFILE="${1-}"
 SELECT_STUDENT=false
+REGRADE=false
 
 if [[ -z "${INPUT_ZIPFILE}" ]]; then
-	echo "Usage: ${0} submissions_zipfile [-s]"
+	echo "Usage: ${0} submissions_zipfile [-sr]"
 	exit 1
 fi 
 
@@ -52,6 +53,11 @@ fi
 
 if [[ "${2-}" = "-s" ]]; then
 	SELECT_STUDENT=true
+fi
+
+if [[ "${2-}" = "-r" ]]; then
+	SELECT_STUDENT=true
+	REGRADE=true
 fi
 
 # ============
@@ -75,8 +81,12 @@ then
 fi
 
 # Reset: Remove $ZIPPED, $UNZIPPED, and $RESULTS
-rm -rf   "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${CLEAN_UNZIPPED}" "${RESULTS}"
-mkdir -p "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${CLEAN_UNZIPPED}" 
+rm -rf   "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${RESULTS}"
+mkdir -p "${ZIPPED}" "${UNCLEAN_UNZIPPED}"
+if [[ $REGRADE = false ]]; then
+	rm -rf "${CLEAN_UNZIPPED}"
+	mkdir -p "${CLEAN_UNZIPPED}"
+fi
 
 # Unzip all moodle zipfile
 unzip "${INPUT_ZIPFILE}" -d "${ZIPPED}" > /dev/null
@@ -104,6 +114,7 @@ test_names=()
 waiting_to_write=()
 for student_submission_group in "${student_submission_groups[@]}"; do
 	student_id="$(echo $(basename "${student_submission_group}") | cut -d'_' -f1)"
+	student_submission_unzipped_clean="${CLEAN_UNZIPPED}${student_id}/"
 	if [[ "${SELECT_STUDENT}" = true && "${student_id}" != "${SELECTED_STUDENT}" ]]; then
 		continue
 	fi
@@ -115,88 +126,89 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 	test_fail_reason=()
 	echo "=== Running ${student_id}'s submission ==="
 	for _ in "0"; do
-		# ============
-		# Import Project
-		# ============
-		# - Unzip submission and place in $UNCLEAN_UNZIPPED/$student_id
-		mapfile -t student_submissions < <("${FD_CMD}" -I -e 'zip' . "${student_submission_group}")
-		if [[ "${#student_submissions[@]}" -gt 1 ]]; then
-			import_errors+=('Multiple submissions found. Skipping...')
-			break
-		elif [[ "${#student_submissions[@]}" -lt 1 ]]; then
-			import_errors+=('No submission found. Skipping...')
-			break
-		fi
-
-		student_submission_zipped="${student_submissions[0]}"
-		student_submission_unzipped_unclean="${UNCLEAN_UNZIPPED}${student_id}/"
-		if ! unzip -q "${student_submission_zipped}" -d "${student_submission_unzipped_unclean}";
-		then
-			import_errors+=("Failed to unzip ${student_submission_zipped}")
-			continue
-		fi
-
-		# ============
-		# Submission Cleaning and Setup
-		# ============
-		# - Verify script contains all $PROJECT_CLASSES
-		# - Move all project classes to $CLEAN_UNZIPPED/$student_id
-		# - copy $TEST_CLASS to $CLEAN_UNZIPPED/$student_id/$TEST_CLASS_DEST/$TEST_CLASS
-		ok=true
-		student_submission_unzipped_clean="${CLEAN_UNZIPPED}${student_id}/"
-		for PROJECT_CLASS in "${PROJECT_CLASSES[@]}"; do
-			clean_dest="${student_submission_unzipped_clean}${PROJECT_CLASS}"
-			package="$(dirname "${PROJECT_CLASS}")"
-			mapfile -t project_class_unclean_location < <("${FD_CMD}" -Ipt file "${PROJECT_CLASS}" "${student_submission_unzipped_unclean}")
-			num_file_matches="${#project_class_unclean_location[@]}"
-
-			if [[ "${num_file_matches}" -gt 1 ]];
-			then
-				import_errors+=("Too many files matching ${PROJECT_CLASS}.")
-				ok=false
+		if [[ "${REGRADE}" = false ]]; then
+			# ============
+			# Import Project
+			# ============
+			# - Unzip submission and place in $UNCLEAN_UNZIPPED/$student_id
+			mapfile -t student_submissions < <("${FD_CMD}" -I -e 'zip' . "${student_submission_group}")
+			if [[ "${#student_submissions[@]}" -gt 1 ]]; then
+				import_errors+=('Multiple submissions found. Skipping...')
 				break
-			elif [[ "${num_file_matches}" -lt 1 ]];
+			elif [[ "${#student_submissions[@]}" -lt 1 ]]; then
+				import_errors+=('No submission found. Skipping...')
+				break
+			fi
+
+			student_submission_zipped="${student_submissions[0]}"
+			student_submission_unzipped_unclean="${UNCLEAN_UNZIPPED}${student_id}/"
+			if ! unzip -q "${student_submission_zipped}" -d "${student_submission_unzipped_unclean}";
 			then
-				# Attempted coercion of file into correct package. If this fails not my problem
-				# Changes package of a file matching basename ${PROJECT_CLASS} to expected package in-place
-				mapfile -t project_class_unclean_location < <("${FD_CMD}" -Ipt file "$(basename "${PROJECT_CLASS}")" "${student_submission_unzipped_unclean}")
+				import_errors+=("Failed to unzip ${student_submission_zipped}")
+				continue
+			fi
+
+			# ============
+			# Submission Cleaning and Setup
+			# ============
+			# - Verify script contains all $PROJECT_CLASSES
+			# - Move all project classes to $CLEAN_UNZIPPED/$student_id
+			# - copy $TEST_CLASS to $CLEAN_UNZIPPED/$student_id/$TEST_CLASS_DEST/$TEST_CLASS
+			ok=true
+			for PROJECT_CLASS in "${PROJECT_CLASSES[@]}"; do
+				clean_dest="${student_submission_unzipped_clean}${PROJECT_CLASS}"
+				package="$(dirname "${PROJECT_CLASS}")"
+				mapfile -t project_class_unclean_location < <("${FD_CMD}" -Ipt file "${PROJECT_CLASS}" "${student_submission_unzipped_unclean}")
 				num_file_matches="${#project_class_unclean_location[@]}"
+
 				if [[ "${num_file_matches}" -gt 1 ]];
 				then
-					import_errors+=("Too many files matching $(basename ${PROJECT_CLASS}).")
+					import_errors+=("Too many files matching ${PROJECT_CLASS}.")
 					ok=false
 					break
 				elif [[ "${num_file_matches}" -lt 1 ]];
 				then
-					import_errors+=("No files matching $(basename ${PROJECT_CLASS}).")
+					# Attempted coercion of file into correct package. If this fails not my problem
+					# Changes package of a file matching basename ${PROJECT_CLASS} to expected package in-place
+					mapfile -t project_class_unclean_location < <("${FD_CMD}" -Ipt file "$(basename "${PROJECT_CLASS}")" "${student_submission_unzipped_unclean}")
+					num_file_matches="${#project_class_unclean_location[@]}"
+					if [[ "${num_file_matches}" -gt 1 ]];
+					then
+						import_errors+=("Too many files matching $(basename ${PROJECT_CLASS}).")
+						ok=false
+						break
+					elif [[ "${num_file_matches}" -lt 1 ]];
+					then
+						import_errors+=("No files matching $(basename ${PROJECT_CLASS}).")
+						ok=false
+						break
+					fi
+					# TODO: Remove ${student_submission_unzipped_unclean} from front of ${project_class_unclean_location[0]}
+					import_warnings+=("Coerced ${project_class_unclean_location[0]} to ${PROJECT_CLASS}")
+				else
+					# Verify in right package and contains package declaration at top
+					if ! grep -lP "^\s*package\s+${package}\s*;\s*$" "${project_class_unclean_location}" &> /dev/null; then
+						import_warnings+=("${PROJECT_CLASS} found in correct location but missing proper package declaration")
+					fi
+				fi 
+				mkdir -p "$(dirname "${clean_dest}")"
+				if ! sed -r 's/\s*package.*//' "${project_class_unclean_location[0]}" | sed "1i package ${package};" > "${clean_dest}"; then
+					import_errors+=("Failed to coerce and move \'${project_class_unclean_location[0]}\' to \'${clean_dest}\'.")
 					ok=false
 					break
 				fi
-				# TODO: Remove ${student_submission_unzipped_unclean} from front of ${project_class_unclean_location[0]}
-				import_warnings+=("Coerced ${project_class_unclean_location[0]} to ${PROJECT_CLASS}")
-			else
-				# Verify in right package and contains package declaration at top
-				if ! grep -lP "^\s*package\s+${package}\s*;\s*$" "${project_class_unclean_location}" &> /dev/null; then
-					import_warnings+=("${PROJECT_CLASS} found in correct location but missing proper package declaration")
-				fi
-			fi 
-			mkdir -p "$(dirname "${clean_dest}")"
-			if ! sed -r 's/\s*package.*//' "${project_class_unclean_location[0]}" | sed "1i package ${package};" > "${clean_dest}"; then
-				import_errors+=("Failed to coerce and move \'${project_class_unclean_location[0]}\' to \'${clean_dest}\'.")
-				ok=false
+				rm "${project_class_unclean_location[0]}"
+			done
+			if ! $ok; then
 				break
 			fi
-			rm "${project_class_unclean_location[0]}"
-		done
-		if ! $ok; then
-			break
-		fi
 
-		test_file_dest_dir="${student_submission_unzipped_clean}${TEST_CLASS_DEST}"
-		mkdir -p "${test_file_dest_dir}"
-		if ! cp "$(realpath "${TEST_CLASS}")" "${test_file_dest_dir}${TEST_CLASS}"; then
-			import_errors+=("Failed to copy \'$(realpath ${TEST_CLASS})\' to \'${test_file_dest_dir}${TEST_CLASS}\'.")
-			continue
+			test_file_dest_dir="${student_submission_unzipped_clean}${TEST_CLASS_DEST}"
+			mkdir -p "${test_file_dest_dir}"
+			if ! cp "$(realpath "${TEST_CLASS}")" "${test_file_dest_dir}${TEST_CLASS}"; then
+				import_errors+=("Failed to copy \'$(realpath ${TEST_CLASS})\' to \'${test_file_dest_dir}${TEST_CLASS}\'.")
+				continue
+			fi
 		fi
 
 		# ============
@@ -235,7 +247,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			# Write header
 			header="student_id,notes,import errors,import warnings,compile errors"
 			for test_name in "${test_names[@]}"; do
-				header="${header},$(escape "${test_name} passed"),$(escape "${test_name} fail reason")"
+				header="${header},$(escape "${test_name} passed"),$(escape "${test_name} feedback")"
 			done
 			if [[ ! -s "${RESULTS}" ]]; then
 				echo "${header}" > "${RESULTS}"
@@ -243,8 +255,8 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 				sed -i "1i ${header}" "${RESULTS}"
 			fi
 		fi
-		mapfile -t tests_passed < <(jq -r '.[].pass' "${student_submission_unzipped_clean}${results_dest}")
-		mapfile -t test_fail_reason < <(jq -r '.[].reason' "${student_submission_unzipped_clean}${results_dest}")
+		mapfile -t tests_passed < <(jq '.[].pass' "${student_submission_unzipped_clean}${results_dest}")
+		mapfile -t test_fail_reason < <(jq '.[].reason' "${student_submission_unzipped_clean}${results_dest}")
 	done
 	# ============
 	# Write results to csv
@@ -272,7 +284,8 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 		fail_reason=""
 		if [[ "${#tests_passed[@]}" -gt 0 ]]; then
 			test_passed="${tests_passed[${index}]}"
-			fail_reason="${test_fail_reason[${index}]}"
+			fail_reason_no_quotes="${test_fail_reason[${index}]}"
+			fail_reason="${fail_reason_no_quotes:1:$((${#fail_reason_no_quotes} - 2))}"
 		fi
 		row="${row},$(escape "${test_passed}"),$(escape "${fail_reason}")"
 	done
