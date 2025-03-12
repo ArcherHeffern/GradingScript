@@ -1,73 +1,31 @@
 #!/usr/bin/env bash
 
 set -euo pipefail 
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
 
+# About: Autograder for Moodle submitted programming assignments
+# Author: Archer Heffern
+# OS: Ubuntu 24.04.2
+# Runtime: bash 5.2.21
+#
 # TODO
 # - Support comparing student output with expected output and saving as diff
 # - Paralellize with GNU Parallel
 # - Locale error: Student has name with unicode character :(
-
-if command -v fd >/dev/null 2>&1; then
-    FD_CMD="fd"
-elif command -v fdfind >/dev/null 2>&1; then
-    FD_CMD="fdfind"
-else
-    echo >&2 "Script requires 'fd' (or 'fdfind' on Debian-based systems) but neither is installed. Aborting."
-    exit 1
-fi
-
-DEPENDENCIES=('firejail' 'zip' 'jq' 'fzf')
-for DEPENDENCY in "${DEPENDENCIES[@]}"; do
-	if ! command -v "${DEPENDENCY}" > /dev/null 2>&1; then
-		echo >&2 "Script requires '${DEPENDENCY}' but isn't installed. Aborting."
-		exit 1
-	fi
-done
-
-function escape {
-	# Escapes a line according to csv format
-	# Replaces each double quote with two double quotes and double quotes the line
-	# eg. 'he"l"o' -> '"he""l""o"'
-	# Usage: escape '<string>'
-	unquoted="${1}"
-	quoted="$(echo "${unquoted}" | sed 's/"/""/g')"
-	echo "\"${quoted}\""
-}
+# - Don't rerun during bulk execution unless using a flag
+# - If rerun test for students. Update results.csv
 
 # ============
-# Process arguments
-# ============
-INPUT_ZIPFILE="${1-}"
-SELECT_STUDENT=false
-REGRADE=false
-
-if [[ -z "${INPUT_ZIPFILE}" ]]; then
-	echo "Usage: ${0} submissions_zipfile [-sr]"
-	exit 1
-fi 
-
-if [[ ! -f "${INPUT_ZIPFILE}" ]]; then 
-	echo "Error: ${INPUT_ZIPFILE} does not exist"
-	exit 1
-fi
-
-if [[ "${2-}" = "-s" ]]; then
-	SELECT_STUDENT=true
-fi
-
-if [[ "${2-}" = "-r" ]]; then
-	SELECT_STUDENT=true
-	REGRADE=true
-fi
-
-# ============
-# Globals: All paths should be relative to this executable
+# Globals: All paths should be relative to this executable. All directories should end with /
 # ============
 # - Configurable Constants
 RESULTS="results.csv"
-TEST_CLASS="Test2.java" # Cannot have multiple periods. java -cp... depends on this!
-TEST_CLASS_DEST="main/"
-PROJECT_CLASSES=("main/PCB.java" "main/ProcessManager.java" "main/Queue.java")
+LANG="go" # "java" | "go"
+TEST_CLASS="test_test.go" # Cannot have multiple periods. java -cp... depends on this!
+TEST_CLASS_DEST="viewservice/" 
+PROJECT_CLASSES=("go.mod" "viewservice/client.go" "viewservice/common.go" "viewservice/server.go" "pbservice/client.go" "pbservice/common.go" "pbservice/server.go")
+
 # - Internal Constants
 UNCLEAN_UNZIPPED="unclean_unzipped/"
 CLEAN_UNZIPPED="clean_unzipped/"
@@ -80,23 +38,88 @@ then
 	exit 1
 fi
 
+DEPENDENCIES=('fdfind' 'firejail' 'zip' 'unzip' 'jq' 'fzf')
+for DEPENDENCY in "${DEPENDENCIES[@]}"; do
+	if ! command -v "${DEPENDENCY}" > /dev/null 2>&1; then
+		echo >&2 "Script requires '${DEPENDENCY}' but isn't installed. Aborting."
+		exit 1
+	fi
+done
+
+function print_help {
+	echo "Usage: ${0} [-ahsrcf] submissions_zipfile"
+	echo "-a|--all: (Default) Grade all submissions in submission_zipfile"
+	echo "-h|--help: Print help message"
+	echo "-s|--select: Select a student submission to extract and run"
+	echo "-r|--regrade: Regrades a student submission by recompiling their files in clean_unzipped"
+	echo "-c|--cache: Default except when using --regrade. Skips students with results in \$RESULTS"
+	echo "-nc|--no-cache: Overwrites previous results if they exist, or appends to \$RESULTS"
+}
+
+# ============
+# Process arguments
+# ============
+INPUT_ZIPFILE=
+SELECT_STUDENT=
+REGRADE=
+CACHE=
+
+for OPTION in "${@:1}"; do
+	case "${OPTION}" in
+		-a|--all) REGRADE=false; SELECT_STUDENT=false;;
+		-s|--select) SELECT_STUDENT=true;;
+		-h|--help) print_help; exit 0;;
+		-r|--regrade) SELECT_STUDENT=true; REGRADE=true; CACHE=false;;
+		-c|--cache) CACHE=true;;
+		-nc|--no-cache) CACHE=false;;
+		*) INPUT_ZIPFILE="${OPTION}";;
+	esac
+done
+: "${SELECT_STUDENT:=false}"
+: "${REGRADE:=false}"
+: "${CACHE:=true}"
+
+# Validate arguments
+$CACHE && $REGRADE && { echo "Cannot set --cache and --regrade"; exit 1; };
+
+if [[ -z "${INPUT_ZIPFILE}" ]]; then 
+	print_help
+	exit 1
+fi
+
+if [[ ! -f "${INPUT_ZIPFILE}" ]]; then 
+	echo "Error: ${INPUT_ZIPFILE} does not exist"
+	exit 1
+fi
+
+function escape {
+	# Escapes a line according to csv format
+	# Replaces each double quote with two double quotes and double quotes the line
+	# eg. 'he"l"o' -> '"he""l""o"'
+	# Usage: escape '<string>'
+	unquoted="${1}"
+	quoted="$(echo "${unquoted}" | sed 's/"/""/g')"
+	echo "\"${quoted}\""
+}
+
 # Reset: Remove $ZIPPED, $UNZIPPED, and $RESULTS
 rm -rf   "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${RESULTS}"
 mkdir -p "${ZIPPED}" "${UNCLEAN_UNZIPPED}"
+touch "$RESULTS"
 if [[ $REGRADE = false ]]; then
 	rm -rf "${CLEAN_UNZIPPED}"
 	mkdir -p "${CLEAN_UNZIPPED}"
 fi
 
 # Unzip all moodle zipfile
-unzip "${INPUT_ZIPFILE}" -d "${ZIPPED}" > /dev/null
+unzip -O UTF-8 "${INPUT_ZIPFILE}" -d "${ZIPPED}" > /dev/null
 
 # Process all submissions
-mapfile -t student_submission_groups < <("${FD_CMD}" -I -t directory "${MOODLE_SUBMISSION_EXTENSION}$" "${ZIPPED}")
+mapfile -t student_submission_groups < <(fdfind -I -t directory "${MOODLE_SUBMISSION_EXTENSION}$" "${ZIPPED}")
 
-if [[ $SELECT_STUDENT = true ]]; then
+if $SELECT_STUDENT; then
 	mapfile -t student_ids < <( \
-		unzip -l "${INPUT_ZIPFILE}" \
+		unzip -O UTF-8 -l "${INPUT_ZIPFILE}" \
 		| grep -Po '[a-zA-Z ]*_\d+_assignsubmission_file' \
 		| cut -d'_' -f1 \
 		| sort \
@@ -118,6 +141,8 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 	if [[ "${SELECT_STUDENT}" = true && "${student_id}" != "${SELECTED_STUDENT}" ]]; then
 		continue
 	fi
+
+	! $SELECT_STUDENT && $CACHE && grep -lq "$student_id" "$RESULTS" && { echo "skipping ${student_id}..."; continue; }
 	notes=()
 	import_errors=()
 	import_warnings=()
@@ -131,7 +156,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			# Import Project
 			# ============
 			# - Unzip submission and place in $UNCLEAN_UNZIPPED/$student_id
-			mapfile -t student_submissions < <("${FD_CMD}" -I -e 'zip' . "${student_submission_group}")
+			mapfile -t student_submissions < <(fdfind -I -e 'zip' -e 'tar.gz' . "${student_submission_group}")
 			if [[ "${#student_submissions[@]}" -gt 1 ]]; then
 				import_errors+=('Multiple submissions found. Skipping...')
 				break
@@ -142,6 +167,16 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 
 			student_submission_zipped="${student_submissions[0]}"
 			student_submission_unzipped_unclean="${UNCLEAN_UNZIPPED}${student_id}/"
+			student_submission_zipped_basename=$(basename "${student_submission_zipped}")
+			extension="${student_submission_zipped_basename#*.}"
+			# TODO: Handle decompression of multiple extensions
+			# case "$extension" in 
+			# 	"tar.gz") echo "Tar gz" ;;
+			# 	"zip") echo "unzip" ;;
+			# 	*) echo "Huh"
+			# esac
+			# continue
+
 			if ! unzip -q "${student_submission_zipped}" -d "${student_submission_unzipped_unclean}";
 			then
 				import_errors+=("Failed to unzip ${student_submission_zipped}")
@@ -158,7 +193,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			for PROJECT_CLASS in "${PROJECT_CLASSES[@]}"; do
 				clean_dest="${student_submission_unzipped_clean}${PROJECT_CLASS}"
 				package="$(dirname "${PROJECT_CLASS}")"
-				mapfile -t project_class_unclean_location < <("${FD_CMD}" -Ipt file "${PROJECT_CLASS}" "${student_submission_unzipped_unclean}")
+				mapfile -t project_class_unclean_location < <(fdfind -Ipt file "${PROJECT_CLASS}" "${student_submission_unzipped_unclean}")
 				num_file_matches="${#project_class_unclean_location[@]}"
 
 				if [[ "${num_file_matches}" -gt 1 ]];
@@ -170,7 +205,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 				then
 					# Attempted coercion of file into correct package. If this fails not my problem
 					# Changes package of a file matching basename ${PROJECT_CLASS} to expected package in-place
-					mapfile -t project_class_unclean_location < <("${FD_CMD}" -Ipt file "$(basename "${PROJECT_CLASS}")" "${student_submission_unzipped_unclean}")
+					mapfile -t project_class_unclean_location < <(fdfind -Ipt file "$(basename "${PROJECT_CLASS}")" "${student_submission_unzipped_unclean}")
 					num_file_matches="${#project_class_unclean_location[@]}"
 					if [[ "${num_file_matches}" -gt 1 ]];
 					then
