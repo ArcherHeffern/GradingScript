@@ -137,7 +137,6 @@ test_names=()
 waiting_to_write=()
 for student_submission_group in "${student_submission_groups[@]}"; do
 	student_id="$(echo $(basename "${student_submission_group}") | cut -d'_' -f1)"
-	student_submission_unzipped_clean="${CLEAN_UNZIPPED}${student_id}/"
 	if [[ "${SELECT_STUDENT}" = true && "${student_id}" != "${SELECTED_STUDENT}" ]]; then
 		continue
 	fi
@@ -238,12 +237,11 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 				break
 			fi
 
-			test_file_dest_dir="${student_submission_unzipped_clean}${TEST_CLASS_DEST}"
-			mkdir -p "${test_file_dest_dir}"
-			if ! cp "$(realpath "${TEST_CLASS}")" "${test_file_dest_dir}${TEST_CLASS}"; then
-				import_errors+=("Failed to copy \'$(realpath ${TEST_CLASS})\' to \'${test_file_dest_dir}${TEST_CLASS}\'.")
-				continue
-			fi
+		test_file_dest_dir="${student_submission_unzipped_clean}${TEST_CLASS_DEST}"
+		mkdir -p "${test_file_dest_dir}"
+		if ! cp "$(realpath "${TEST_CLASS}")" "${test_file_dest_dir}${TEST_CLASS}"; then
+			import_errors+=("Failed to copy \'$(realpath ${TEST_CLASS})\' to \'${test_file_dest_dir}${TEST_CLASS}\'.")
+			continue
 		fi
 
 		# ============
@@ -282,7 +280,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			# Write header
 			header="student_id,notes,import errors,import warnings,compile errors"
 			for test_name in "${test_names[@]}"; do
-				header="${header},$(escape "${test_name} passed"),$(escape "${test_name} feedback")"
+				header="${header},$(escape "${test_name} passed"),$(escape "${test_name} fail reason")"
 			done
 			if [[ ! -s "${RESULTS}" ]]; then
 				echo "${header}" > "${RESULTS}"
@@ -290,8 +288,8 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 				sed -i "1i ${header}" "${RESULTS}"
 			fi
 		fi
-		mapfile -t tests_passed < <(jq '.[].pass' "${student_submission_unzipped_clean}${results_dest}")
-		mapfile -t test_fail_reason < <(jq '.[].reason' "${student_submission_unzipped_clean}${results_dest}")
+		mapfile -t tests_passed < <(jq -r '.[].pass' "${student_submission_unzipped_clean}${results_dest}")
+		mapfile -t test_fail_reason < <(jq -r '.[].reason' "${student_submission_unzipped_clean}${results_dest}")
 	done
 	# ============
 	# Write results to csv
@@ -319,8 +317,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 		fail_reason=""
 		if [[ "${#tests_passed[@]}" -gt 0 ]]; then
 			test_passed="${tests_passed[${index}]}"
-			fail_reason_no_quotes="${test_fail_reason[${index}]}"
-			fail_reason="${fail_reason_no_quotes:1:$((${#fail_reason_no_quotes} - 2))}"
+			fail_reason="${test_fail_reason[${index}]}"
 		fi
 		row="${row},$(escape "${test_passed}"),$(escape "${fail_reason}")"
 	done
