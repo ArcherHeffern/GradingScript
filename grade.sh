@@ -36,6 +36,8 @@ UNCLEAN_UNZIPPED="unclean_unzipped/"
 CLEAN_UNZIPPED="clean_unzipped/"
 ZIPPED="zipped/"
 MOODLE_SUBMISSION_EXTENSION="_assignsubmission_file"
+NOK_PROJECT="nok${MOODLE_SUBMISSION_EXTENSION}"
+NOK_PROJECT_ZIP="${NOK_PROJECT}.zip"
 
 if [[ ! -f "${TEST_CLASS}" ]]; 
 then
@@ -52,40 +54,45 @@ for DEPENDENCY in "${DEPENDENCIES[@]}"; do
 done
 
 function print_help {
-	echo "Usage: ${0} [-ahsrcf] submissions_zipfile"
+	echo "Usage: ${0} [-achmnrsz] zipfile"
 	echo "-a|--all: (Default) Grade all submissions in submission_zipfile"
-	echo "-h|--help: Print help message"
-	echo "-s|--select: Select a student submission to extract and run"
-	echo "-r|--regrade: Regrades a student submission by recompiling their files in clean_unzipped"
 	echo "-c|--cache: Default except when using --regrade. Skips students with results in \$RESULTS"
-	echo "-nc|--no-cache: Overwrites previous results if they exist, or appends to \$RESULTS"
+	echo "-h|--help: Print help message"
+	echo "-m|--moodle: (default) Grade a moodle submission zipfile"
+	echo "-n|--no-cache: Overwrites previous results if they exist, or appends to \$RESULTS"
+	echo "-r|--regrade: Regrades a student submission by recompiling their files in clean_unzipped"
+	echo "-s|--select: Select a student submission to extract and run"
+	echo "-z|-zipfile: Grade a single zipfile instead of moodle zipfile. No other options will apply"
 }
 
 # ============
 # Process arguments
 # ============
 INPUT_ZIPFILE=
-SELECT_STUDENT=
-REGRADE=
-CACHE=
+SELECT_STUDENT="false"
+REGRADE="false"
+CACHE="true"
+TARGET="moodle" # moodle | zipfile
+
 
 for OPTION in "${@:1}"; do
 	case "${OPTION}" in
 		-a|--all) REGRADE=false; SELECT_STUDENT=false;;
-		-s|--select) SELECT_STUDENT=true;;
-		-h|--help) print_help; exit 0;;
-		-r|--regrade) SELECT_STUDENT=true; REGRADE=true; CACHE=false;;
 		-c|--cache) CACHE=true;;
-		-nc|--no-cache) CACHE=false;;
+		-h|--help) print_help; exit 0;;
+		-m|--moodle) TARGET="moodle";;
+		-n|--no-cache) CACHE=false;;
+		-r|--regrade) SELECT_STUDENT=true; REGRADE=true; CACHE=false;;
+		-s|--select) SELECT_STUDENT=true;;
+		-z|--zipfile) TARGET="zipfile";;
 		*) INPUT_ZIPFILE="${OPTION}";;
 	esac
 done
-: "${SELECT_STUDENT:=false}"
-: "${REGRADE:=false}"
-: "${CACHE:=true}"
 
 # Validate arguments
 $CACHE && $REGRADE && { echo "Cannot set --cache and --regrade"; exit 1; };
+
+[ "$TARGET" = "zipfile" ] && $SELECT_STUDENT && ! $REGRADE && { echo "No options apply when using --zipfile option"; exit 1; }
 
 if [[ -z "${INPUT_ZIPFILE}" ]]; then 
 	print_help
@@ -134,12 +141,20 @@ if [[ "$SELECT_STUDENT" = true ]]; then
 fi
 
 # Reset: Remove $ZIPPED, $UNZIPPED, and $RESULTS
-rm -rf   "${ZIPPED}" "${UNCLEAN_UNZIPPED}" 
-mkdir -p "${ZIPPED}" "${UNCLEAN_UNZIPPED}"
+rm -rf   "$ZIPPED" "$UNCLEAN_UNZIPPED" "$NOK_PROJECT" "$NOK_PROJECT_ZIP"
+mkdir -p "$ZIPPED" "$UNCLEAN_UNZIPPED"
 touch "$RESULTS"
 if [[ "$REGRADE" = false && "$SELECT_STUDENT" = false ]]; then
 	rm -rf "${CLEAN_UNZIPPED}"
 	mkdir -p "${CLEAN_UNZIPPED}"
+fi
+
+if [[ "$TARGET" == "zipfile" ]]; then
+	mkdir "$NOK_PROJECT"
+	cp "$INPUT_ZIPFILE" "$NOK_PROJECT"
+	zip -r "$NOK_PROJECT_ZIP" "${NOK_PROJECT}/${INPUT_ZIPFILE}"
+	rm -rf "${NOK_PROJECT}"
+	INPUT_ZIPFILE="$NOK_PROJECT_ZIP"
 fi
 
 # Unzip all moodle zipfile
@@ -368,4 +383,4 @@ done
 
 # Clean up
 echo "Cleaning up..."
-rm -rf "${ZIPPED}" "${UNCLEAN_UNZIPPED}" 
+rm -rf "$ZIPPED" "$UNCLEAN_UNZIPPED" "$NOK_PROJECT" "$NOK_PROJECT_ZIP"
