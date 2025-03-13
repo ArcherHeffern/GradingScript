@@ -12,19 +12,28 @@ export LANG=C.UTF-8
 # TODO
 # - Support comparing student output with expected output and saving as diff
 # - Paralellize with GNU Parallel
-# - Locale error: Student has name with unicode character :(
+# - Format output for easier grading
+# - Make easier to capture output of running program (debug mode? -d)
 # - Don't rerun during bulk execution unless using a flag
 # - If rerun test for students. Update results.csv
+#
+# Bugs
+# - replacement of student entry doesn't work if entry is multiple lines. 
+# - Extraction of tar.gz not implemented
+# - go test not supported
 
 # ============
 # Globals: All paths should be relative to this executable. All directories should end with /
 # ============
 # - Configurable Constants
 RESULTS="results.csv"
-LANG="go" # "java" | "go"
-TEST_CLASS="test_test.go" # Cannot have multiple periods. java -cp... depends on this!
-TEST_CLASS_DEST="viewservice/" 
-PROJECT_CLASSES=("go.mod" "viewservice/client.go" "viewservice/common.go" "viewservice/server.go" "pbservice/client.go" "pbservice/common.go" "pbservice/server.go")
+LANG="java" # "java" | "go"
+TEST_CLASS="Test2.java" # Cannot have multiple periods. java -cp... depends on this!
+TEST_CLASS_DEST="main/" 
+PROJECT_CLASSES=("main/PCB.java" "main/ProcessManager.java" "main/Queue.java")
+# TEST_CLASS="test_test.go" # Cannot have multiple periods. java -cp... depends on this!
+# TEST_CLASS_DEST="viewservice/" 
+# PROJECT_CLASSES=("go.mod" "viewservice/client.go" "viewservice/common.go" "viewservice/server.go" "pbservice/client.go" "pbservice/common.go" "pbservice/server.go")
 
 # - Internal Constants
 UNCLEAN_UNZIPPED="unclean_unzipped/"
@@ -102,8 +111,23 @@ function escape {
 	echo "\"${quoted}\""
 }
 
+if [[ "$SELECT_STUDENT" = true ]]; then
+	mapfile -t student_ids < <( \
+		unzip -l -O UTF-8 "${INPUT_ZIPFILE}" \
+		| grep -Po '[a-zA-Z][a-zA-Z ]*_\d+_assignsubmission_file' \
+		| cut -d'_' -f1 \
+		| sort \
+		| uniq \
+	)
+	SELECTED_STUDENT="$(printf "%s\n" "${student_ids[@]}" | fzf)"
+	if [[ $? -ne 0 ]]; then
+		echo 2> "No student selected. Exiting..."
+		exit 0
+	fi
+fi
+
 # Reset: Remove $ZIPPED, $UNZIPPED, and $RESULTS
-rm -rf   "${ZIPPED}" "${UNCLEAN_UNZIPPED}" "${RESULTS}"
+rm -rf   "${ZIPPED}" "${UNCLEAN_UNZIPPED}" 
 mkdir -p "${ZIPPED}" "${UNCLEAN_UNZIPPED}"
 touch "$RESULTS"
 if [[ $REGRADE = false ]]; then
@@ -117,38 +141,28 @@ unzip -O UTF-8 "${INPUT_ZIPFILE}" -d "${ZIPPED}" > /dev/null
 # Process all submissions
 mapfile -t student_submission_groups < <(fdfind -I -t directory "${MOODLE_SUBMISSION_EXTENSION}$" "${ZIPPED}")
 
-if $SELECT_STUDENT; then
-	mapfile -t student_ids < <( \
-		unzip -O UTF-8 -l "${INPUT_ZIPFILE}" \
-		| grep -Po '[a-zA-Z ]*_\d+_assignsubmission_file' \
-		| cut -d'_' -f1 \
-		| sort \
-		| uniq \
-	)
-	SELECTED_STUDENT="$(printf "%s\n" "${student_ids[@]}" | fzf)"
-	if [[ $? -ne 0 ]]; then
-		echo 2> "No student selected. Exiting..."
-		exit 0
-	fi
-
-fi
-
 test_names=()
 waiting_to_write=()
+results_existed="false"
+if [[ -s "$RESULTS" ]]; then
+	results_existed="true"
+fi
+
 for student_submission_group in "${student_submission_groups[@]}"; do
 	student_id="$(echo $(basename "${student_submission_group}") | cut -d'_' -f1)"
-	if [[ "${SELECT_STUDENT}" = true && "${student_id}" != "${SELECTED_STUDENT}" ]]; then
+	student_submission_unzipped_clean="${CLEAN_UNZIPPED}${student_id}/"
+	if [[ "$SELECT_STUDENT" = true && "${student_id}" != "${SELECTED_STUDENT}" ]]; then
 		continue
 	fi
 
-	! $SELECT_STUDENT && $CACHE && grep -lq "$student_id" "$RESULTS" && { echo "skipping ${student_id}..."; continue; }
+	$CACHE && grep -lq "$student_id" "$RESULTS" && { echo "skipping ${student_id}..."; continue; }
+	echo "=== Running ${student_id}'s submission ==="
 	notes=()
 	import_errors=()
 	import_warnings=()
 	compile_errors=""
 	tests_passed=()
 	test_fail_reason=()
-	echo "=== Running ${student_id}'s submission ==="
 	for _ in "0"; do
 		if [[ "${REGRADE}" = false ]]; then
 			# ============
@@ -176,8 +190,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			# esac
 			# continue
 
-			if ! unzip -q "${student_submission_zipped}" -d "${student_submission_unzipped_unclean}";
-			then
+			if ! unzip -q "${student_submission_zipped}" -d "${student_submission_unzipped_unclean}"; then
 				import_errors+=("Failed to unzip ${student_submission_zipped}")
 				continue
 			fi
@@ -237,11 +250,12 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 				break
 			fi
 
-		test_file_dest_dir="${student_submission_unzipped_clean}${TEST_CLASS_DEST}"
-		mkdir -p "${test_file_dest_dir}"
-		if ! cp "$(realpath "${TEST_CLASS}")" "${test_file_dest_dir}${TEST_CLASS}"; then
-			import_errors+=("Failed to copy \'$(realpath ${TEST_CLASS})\' to \'${test_file_dest_dir}${TEST_CLASS}\'.")
-			continue
+			test_file_dest_dir="${student_submission_unzipped_clean}${TEST_CLASS_DEST}"
+			mkdir -p "${test_file_dest_dir}"
+			if ! cp "$(realpath "${TEST_CLASS}")" "${test_file_dest_dir}${TEST_CLASS}"; then
+				import_errors+=("Failed to copy \'$(realpath ${TEST_CLASS})\' to \'${test_file_dest_dir}${TEST_CLASS}\'.")
+				continue
+			fi
 		fi
 
 		# ============
@@ -269,14 +283,14 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			--read-only=/ \
 			--private-cwd="$(realpath "${student_submission_unzipped_clean}")" \
 			--whitelist="$(realpath "${student_submission_unzipped_clean}")" \
-			java -cp "$(realpath "${student_submission_unzipped_clean}")" "$(echo "${TEST_CLASS_DEST}${TEST_CLASS}" | cut -d'.' -f1)" -- "${results_dest}" &> /dev/null
+			java -cp "$(realpath "${student_submission_unzipped_clean}")" "$(echo "${TEST_CLASS_DEST}${TEST_CLASS}" | cut -d'.' -f1)" -- "${results_dest}" 
 		then
-			echo "Failed to run ${student_id}'s submission" # TODO: Should I handle this? 
+			echo "Failed to run ${student_id}'s submission. Perhaps you tried to regrade a submission not in clean_unzipped?" # TODO: Should I handle this? 
 			continue
 		fi
 		# Parse Results
 		if [[ "${#test_names[@]}" -eq 0 ]]; then
-			mapfile -t test_names < <(jq -r '.[].name' "${student_submission_unzipped_clean}${results_dest}")
+			mapfile -t test_names < <(jq '.[].name' "${student_submission_unzipped_clean}${results_dest}")
 			# Write header
 			header="student_id,notes,import errors,import warnings,compile errors"
 			for test_name in "${test_names[@]}"; do
@@ -284,12 +298,12 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			done
 			if [[ ! -s "${RESULTS}" ]]; then
 				echo "${header}" > "${RESULTS}"
-			else
+			elif [[ $results_existed != "true" ]]; then
 				sed -i "1i ${header}" "${RESULTS}"
 			fi
 		fi
-		mapfile -t tests_passed < <(jq -r '.[].pass' "${student_submission_unzipped_clean}${results_dest}")
-		mapfile -t test_fail_reason < <(jq -r '.[].reason' "${student_submission_unzipped_clean}${results_dest}")
+		mapfile -t tests_passed < <(jq '.[].pass' "${student_submission_unzipped_clean}${results_dest}")
+		mapfile -t test_fail_reason < <(jq '.[].reason' "${student_submission_unzipped_clean}${results_dest}")
 	done
 	# ============
 	# Write results to csv
@@ -317,7 +331,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 		fail_reason=""
 		if [[ "${#tests_passed[@]}" -gt 0 ]]; then
 			test_passed="${tests_passed[${index}]}"
-			fail_reason="${test_fail_reason[${index}]}"
+			fail_reason="${test_fail_reason[${index}]:1: -1}"
 		fi
 		row="${row},$(escape "${test_passed}"),$(escape "${fail_reason}")"
 	done
@@ -335,6 +349,12 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 		echo -e "${row}" >> "${RESULTS}"
 	fi
 
+done
+for deferred_row in "${waiting_to_write[@]}"; do # !Untested. Triggers if first student doesn't pass all tests
+	for index in "${!test_names[@]}"; do
+		deferred_row="${deferred_row},\"false\",\"\""
+	done
+	echo -e "${deferred_row}" >> "${RESULTS}"
 done
 
 # Clean up
