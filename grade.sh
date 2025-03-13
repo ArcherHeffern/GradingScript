@@ -10,12 +10,9 @@ export LANG=C.UTF-8
 # Runtime: bash 5.2.21
 #
 # TODO
-# - Support comparing student output with expected output and saving as diff
 # - Paralellize with GNU Parallel
 # - Format output for easier grading
 # - Make easier to capture output of running program (debug mode? -d)
-# - Don't rerun during bulk execution unless using a flag
-# - If rerun test for students. Update results.csv
 #
 # Bugs
 # - Extraction of tar.gz not implemented
