@@ -304,7 +304,13 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 		# ============
 		# Compile and Run Program Securely
 		# ============
-		# Writes results to a random file named during runtime HAHA!
+		# For each project type:
+		# 	run program. Output results to random file. 
+		# 	Get test_names if not yet found
+		# 	Write header to project if not exists. Must start and end with student_id. Last student_id must be on its own line. 
+		# 	tests_passed 		bool[]
+		# 	test_fail_reason 	string[]
+		# 	
 		output="$(
 		{ firejail \
 			--noprofile \
