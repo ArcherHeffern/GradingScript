@@ -194,10 +194,10 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			mapfile -t student_submissions < <(fdfind -I -e 'zip' -e 'tar.gz' . "${student_submission_group}")
 			if [[ "${#student_submissions[@]}" -gt 1 ]]; then
 				import_errors+=('Multiple submissions found. Skipping...')
-				break
+				continue
 			elif [[ "${#student_submissions[@]}" -lt 1 ]]; then
 				import_errors+=('No submission found. Skipping...')
-				break
+				continue
 			fi
 
 			student_submission_zipped="${student_submissions[0]}"
@@ -205,17 +205,24 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			student_submission_zipped_basename=$(basename "${student_submission_zipped}")
 			extension="${student_submission_zipped_basename#*.}"
 			# TODO: Handle decompression of multiple extensions
-			# case "$extension" in 
-			# 	"tar.gz") echo "Tar gz" ;;
-			# 	"zip") echo "unzip" ;;
-			# 	*) echo "Huh"
-			# esac
-			# continue
-
-			if ! unzip -q "${student_submission_zipped}" -d "${student_submission_unzipped_unclean}"; then
-				import_errors+=("Failed to unzip ${student_submission_zipped}")
-				continue
-			fi
+			case "$extension" in 
+				"tar.gz") 
+					echo "Tar gz"
+					# if ! tar xzf "${student_submission_zipped}" -d "${student_submission_unzipped_unclean}"; then
+					# 	import_errors+=("Failed to unzip ${student_submission_zipped}")
+					#	break
+					# fi
+					;;
+				"zip") 
+					if ! unzip -q "${student_submission_zipped}" -d "${student_submission_unzipped_unclean}"; then
+						import_errors+=("Failed to unzip ${student_submission_zipped}")
+						break
+					fi
+					;;
+				*) 
+					import_errors+=("Unrecognized submission extension ${extension}")
+					continue;;
+			esac
 
 			# ============
 			# Submission Cleaning and Setup
