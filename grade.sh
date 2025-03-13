@@ -22,16 +22,31 @@ export LANG=C.UTF-8
 # Globals: All paths should be relative to this executable. All directories should end with /
 # ============
 # - Configurable Constants
-RESULTS="results.csv"
-LANG="java" # "java" | "go"
-TEST_CLASS="Test2.java" # Cannot have multiple periods. java -cp... depends on this!
-TEST_CLASS_DEST="main/" 
-PROJECT_CLASSES=("main/PCB.java" "main/ProcessManager.java" "main/Queue.java")
-# TEST_CLASS="test_test.go" # Cannot have multiple periods. java -cp... depends on this!
-# TEST_CLASS_DEST="viewservice/" 
-# PROJECT_CLASSES=("go.mod" "viewservice/client.go" "viewservice/common.go" "viewservice/server.go" "pbservice/client.go" "pbservice/common.go" "pbservice/server.go")
+LANG= 				# "java" | "go"
+TEST_CLASS= 		# Cannot have multiple periods. java -cp... depends on this!
+TEST_CLASS_DEST=
+PROJECT_CLASSES=
 
-# - Internal Constants
+############
+# Past PA Configurations
+############
+# - COSI 131 PA1: Queues
+# LANG="java" 
+# TEST_CLASS="Test2.java" 
+# TEST_CLASS_DEST="main/"
+# PROJECT_CLASSES=("main/PCB.java" "main/ProcessManager.java" "main/Queue.java")
+
+# - COSI 147 Lab 3b: PbService
+LANG="go" 
+TEST_CLASS="test_test.go" 
+TEST_CLASS_DEST="viewservice/" 
+PROJECT_CLASSES=("go.mod" "viewservice/client.go" "viewservice/common.go" "viewservice/server.go" "pbservice/client.go" "pbservice/common.go" "pbservice/server.go")
+
+
+# ============
+# Global Constants
+# ============
+RESULTS="results.csv"
 UNCLEAN_UNZIPPED="unclean_unzipped/"
 CLEAN_UNZIPPED="clean_unzipped/"
 ZIPPED="zipped/"
@@ -204,14 +219,13 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			student_submission_unzipped_unclean="${UNCLEAN_UNZIPPED}${student_id}/"
 			student_submission_zipped_basename=$(basename "${student_submission_zipped}")
 			extension="${student_submission_zipped_basename#*.}"
-			# TODO: Handle decompression of multiple extensions
 			case "$extension" in 
 				"tar.gz") 
-					echo "Tar gz"
-					# if ! tar xzf "${student_submission_zipped}" -d "${student_submission_unzipped_unclean}"; then
-					# 	import_errors+=("Failed to unzip ${student_submission_zipped}")
-					#	break
-					# fi
+					mkdir "$student_submission_unzipped_unclean"
+					if ! tar --directory="${student_submission_unzipped_unclean}" -xzf "${student_submission_zipped}" &> /dev/null; then
+						import_errors+=("Failed to unzip ${student_submission_zipped}")
+						break
+					fi
 					;;
 				"zip") 
 					if ! unzip -q "${student_submission_zipped}" -d "${student_submission_unzipped_unclean}"; then
