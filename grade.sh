@@ -18,7 +18,6 @@ export LANG=C.UTF-8
 # - If rerun test for students. Update results.csv
 #
 # Bugs
-# - replacement of student entry doesn't work if entry is multiple lines. 
 # - Extraction of tar.gz not implemented
 # - go test not supported
 
@@ -105,10 +104,21 @@ function escape {
 	# Escapes a line according to csv format
 	# Replaces each double quote with two double quotes and double quotes the line
 	# eg. 'he"l"o' -> '"he""l""o"'
-	# Usage: escape '<string>'
-	unquoted="${1}"
-	quoted="$(echo "${unquoted}" | sed 's/"/""/g')"
+	# Usage: escape 'unquoted_line'
+	unquoted_line="${1}"
+
+	quoted="$(echo "${unquoted_line}" | sed 's/"/""/g')"
 	echo "\"${quoted}\""
+}
+
+function write_row {
+	# If student_id is already in $RESULTS, delete this entry 
+	# append the row
+	student_id="${1}"
+	row="${2}"
+
+	sed -i "/^\"${student_id}\"/,/^\"${student_id}\"$/d" "$RESULTS"
+	echo -e "$row" >> "$RESULTS"
 }
 
 if [[ "$SELECT_STUDENT" = true ]]; then
@@ -130,7 +140,7 @@ fi
 rm -rf   "${ZIPPED}" "${UNCLEAN_UNZIPPED}" 
 mkdir -p "${ZIPPED}" "${UNCLEAN_UNZIPPED}"
 touch "$RESULTS"
-if [[ $REGRADE = false ]]; then
+if [[ "$REGRADE" = false && "$SELECT_STUDENT" = false ]]; then
 	rm -rf "${CLEAN_UNZIPPED}"
 	mkdir -p "${CLEAN_UNZIPPED}"
 fi
@@ -155,7 +165,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 		continue
 	fi
 
-	$CACHE && grep -lq "$student_id" "$RESULTS" && { echo "skipping ${student_id}..."; continue; }
+	$CACHE && grep -Plq "^\"$student_id\"" "$RESULTS" && { echo "skipping ${student_id}..."; continue; }
 	echo "=== Running ${student_id}'s submission ==="
 	notes=()
 	import_errors=()
@@ -296,6 +306,7 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 			for test_name in "${test_names[@]}"; do
 				header="${header},$(escape "${test_name} passed"),$(escape "${test_name} fail reason")"
 			done
+			header="${header},student_id_again"
 			if [[ ! -s "${RESULTS}" ]]; then
 				echo "${header}" > "${RESULTS}"
 			elif [[ $results_existed != "true" ]]; then
@@ -335,18 +346,19 @@ for student_submission_group in "${student_submission_groups[@]}"; do
 		fi
 		row="${row},$(escape "${test_passed}"),$(escape "${fail_reason}")"
 	done
+	row="${row},\\n$(escape "${student_id}")"
 
-	if [[ "${#test_names[@]}" -eq 0 && $SELECT_STUDENT != true ]]; then
+	if [[ "${#test_names[@]}" -eq 0 ]]; then
 		waiting_to_write+=("${row}")
 	else
 		for deferred_row in "${waiting_to_write[@]}"; do # !Untested. Triggers if first student doesn't pass all tests
 			for index in "${!test_names[@]}"; do
 				deferred_row="${deferred_row},\"false\",\"\""
 			done
-			echo -e "${deferred_row}" >> "${RESULTS}"
+			write_row "$student_id" "$deferred_row"
 		done
 		deferred_row=()
-		echo -e "${row}" >> "${RESULTS}"
+		write_row "$student_id" "$row"
 	fi
 
 done
@@ -354,7 +366,7 @@ for deferred_row in "${waiting_to_write[@]}"; do # !Untested. Triggers if first 
 	for index in "${!test_names[@]}"; do
 		deferred_row="${deferred_row},\"false\",\"\""
 	done
-	echo -e "${deferred_row}" >> "${RESULTS}"
+	write_row "$student_id" "$deferred_row"
 done
 
 # Clean up
