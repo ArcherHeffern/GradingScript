@@ -108,12 +108,12 @@ public class Test {
     }
 
     @SuppressWarnings("unused")
-    private static void println(String s) {
+    public static void println(String s) {
         previous_stdout.println(s);
     }
 
     @SuppressWarnings("unused")
-    private static void eprintln(String s) {
+    public static void eprintln(String s) {
         previous_stderr.println(s);
     }
 
