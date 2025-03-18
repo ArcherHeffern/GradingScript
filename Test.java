@@ -66,6 +66,7 @@ public class Test {
         return target_lines;
     }
 
+    @SuppressWarnings("unused")
     private static String[] agressiveCleanString(String target) {
         String target_lines[] = target.split("\\R+");
         for (int i = 0; i < target_lines.length; i++) {
@@ -106,26 +107,31 @@ public class Test {
         }
     }
 
+    @SuppressWarnings("unused")
     private static void println(String s) {
         previous_stdout.println(s);
     }
 
+    @SuppressWarnings("unused")
     private static void eprintln(String s) {
         previous_stderr.println(s);
     }
 
+    @SuppressWarnings("unused")
     private static String readStdout() {
         String contents = stdout_stream.toString();
         stdout_stream.reset();
         return contents;
     }
 
+    @SuppressWarnings("unused")
     private static String readStderr() {
         String contents = stderr_stream.toString();
         stderr_stream.reset();
         return contents;
     }
 
+    @SuppressWarnings("unused")
     private static <E extends Exception> TestResult runTest(String testName, ThrowingFunction<E> testMethod) {
         previous_stdout = System.out;
         previous_stderr = System.err;
@@ -156,6 +162,7 @@ public class Test {
         return sb.toString();
     }
 
+    @SuppressWarnings("CallToPrintStackTrace")
     private static void writeToFile(String s, String fileName) {
         try (FileWriter writer = new FileWriter(fileName)) {
             writer.write(s);
