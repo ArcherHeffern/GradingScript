@@ -1,42 +1,51 @@
-package main;
+// package main;
 
 /*
  * @author Archer Heffern
  * @author Danish Abbasi
+ * @java-version >=15.0.0
 */
 
-import java.io.FileWriter;
-import java.io.PrintStream;
-import java.io.OutputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random; 
-import java.util.Arrays;
 
 public class Test {
-	public static void main(String[] args) {
-		if (args.length != 2) {
-			System.out.println("Usage [results]");
-			System.exit(1);
-		}
+	    public static void main(String[] args) {
+        if ((args.length == 2 && args[1].trim().equals("-h"))
+        || args.length > 2) {
+            System.out.println("Usage [-h|results_destfile]");
+            System.exit(0);
+        }
 
         List<TestResult> results = new ArrayList<>();
 
-        results.add(runTest("testcase", Test::test));
+        results.add(runTest("Testcase 1", Test::test));
 
-        writeToJSON(results, args[1]);
+        if (args.length == 2) {
+            String json = convertResultsToJson(results, true);
+            writeToFile(json, args[1]);
+        }
+        else {
+            String json = convertResultsToJson(results, false);
+            System.out.println(json);
+        }
+    }
 
-	}
 
     public static void test() throws Exception {
         System.out.println("Hello world");
 
-        String expected = "Hello world";
+        String expected = """
+        Hello world
+        """;
+
         String actual = readStdout();
-        String[] actual_lines = agressiveCleanString(actual);
-        String[] expected_lines = agressiveCleanString(expected);
+        String[] actual_lines = cleanString(actual);
+        String[] expected_lines = cleanString(expected);
         assertEqualArrays(actual_lines, expected_lines);
     }
 
@@ -74,23 +83,24 @@ public class Test {
 
     private static void assertEqualArrays(String[] actual_lines, String[] expected_lines) throws Exception {
         int min_length = actual_lines.length < expected_lines.length? actual_lines.length: expected_lines.length;
-        int max_length = actual_lines.length > expected_lines.length? actual_lines.length: expected_lines.length;
         for (int i = 0; i < min_length; i++) {
             if (!actual_lines[i].equals(expected_lines[i])) {
                 throw new Exception("Expected \'" + expected_lines[i] + "\' on line " + (i+1) + " but found \'" + actual_lines[i] + "\'.");
             }
         }
         if (actual_lines.length > expected_lines.length) {
-            String extra_lines = "Actual output contains extra lines:\n";
+            String extra_lines = "Actual output contains extra lines:\n\"\"\"\n";
             for (int i = min_length; i < actual_lines.length; i++) {
                 extra_lines += actual_lines[i] + "\n";
             }
+            extra_lines += "\"\"\"";
             throw new Exception(extra_lines);
         } else if (actual_lines.length < expected_lines.length) {
-            String missing_lines = "Actual output missing lines: \n";
+            String missing_lines = "Actual output missing lines: \n\"\"\"\n";
             for (int i = min_length; i < expected_lines.length; i++) {
                 missing_lines += expected_lines[i] + "\n";
             }
+            missing_lines += "\"\"\"";
             throw new Exception(missing_lines);
 
         }
@@ -146,25 +156,28 @@ public class Test {
         return sb.toString();
     }
 
-    private static void writeToJSON(List<TestResult> results, String fileName) {
-        String json = convertResultsToJson(results);
+    private static void writeToFile(String s, String fileName) {
         try (FileWriter writer = new FileWriter(fileName)) {
-            writer.write(json);
+            writer.write(s);
             System.out.println("Test results written to " + fileName);
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
 
-     private static String convertResultsToJson(List<TestResult> results) {
+     private static String convertResultsToJson(List<TestResult> results, boolean escape) {
         StringBuilder json = new StringBuilder();
         json.append("[\n");
         for (int i = 0; i < results.size(); i++) {
             TestResult result = results.get(i);
+            if (escape) {
+                result.name = escapeJson(result.name);
+                result.reason = escapeJson(result.reason);
+            }
             json.append("    {\n");
-            json.append("        \"name\": \"").append(escapeJson(result.name)).append("\",\n");
+            json.append("        \"name\": \"").append(result.name).append("\",\n");
             json.append("        \"pass\": ").append(result.pass).append(",\n");
-            json.append("        \"reason\": \"").append(escapeJson(result.reason)).append("\"\n");
+            json.append("        \"reason\": \"").append(result.reason).append("\"\n");
             json.append("    }");
 
             if (i < results.size() - 1) {
