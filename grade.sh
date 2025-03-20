@@ -69,11 +69,11 @@ for DEPENDENCY in "${DEPENDENCIES[@]}"; do
 done
 
 function print_help {
-	echo "Usage: ${0} [-achmnrsz] zipfile"
+	echo "Usage: ${0} [-achnrsz] moodle_zipfile"
+	echo "Usage: ${0} [-z] zipfile"
 	echo "-a|--all: (Default) Grade all submissions in submission_zipfile"
 	echo "-c|--cache: Default except when using --regrade. Skips students with results in \$RESULTS"
 	echo "-h|--help: Print help message"
-	echo "-m|--moodle: (default) Grade a moodle submission zipfile"
 	echo "-n|--no-cache: Overwrites previous results if they exist, or appends to \$RESULTS"
 	echo "-r|--regrade: Regrades a student submission by recompiling their files in clean_unzipped"
 	echo "-s|--select: Select a student submission to extract and run"
@@ -95,7 +95,6 @@ for OPTION in "${@:1}"; do
 		-a|--all) REGRADE=false; SELECT_STUDENT=false;;
 		-c|--cache) CACHE=true;;
 		-h|--help) print_help; exit 0;;
-		-m|--moodle) TARGET="moodle";;
 		-n|--no-cache) CACHE=false;;
 		-r|--regrade) SELECT_STUDENT=true; REGRADE=true; CACHE=false;;
 		-s|--select) SELECT_STUDENT=true;;
