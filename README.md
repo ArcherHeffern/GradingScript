@@ -14,3 +14,7 @@ Results File:
     }
 ]
 ```
+
+# Junit 
+(Console Launcher)[https://junit.org/junit5/docs/5.0.0-M5/user-guide/#running-tests-console-launcher]
+java -jar junit.jar --scan-class-path -cp . --reports-dir=.

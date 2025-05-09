@@ -31,17 +31,17 @@ PROJECT_CLASSES=
 # Past PA Configurations
 ############
 # - COSI 131 PA1: Queues
-# LANG="java" 
-# TEST_CLASS="Test2.java" 
-# TEST_CLASS_DEST="main/"
-# PROJECT_CLASSES=("main/PCB.java" "main/ProcessManager.java" "main/Queue.java")
+LANG="java" 
+TEST_CLASS="StudentTestPA2.java" 
+TEST_CLASS_DEST="main/"
+PROJECT_CLASSES=("main/PCB.java" "main/ProcessManager.java" "main/Queue.java")
 
 # - COSI 147 Lab 3b: PbService
-LANG="go" 
-TEST_CLASS="test_test.go" 
-TEST_CLASS_DEST="viewservice/" 
-PROJECT_CLASSES=("go.mod" "viewservice/client.go" "viewservice/common.go" "viewservice/server.go" "pbservice/client.go" "pbservice/common.go" "pbservice/server.go")
-
+# LANG="go" 
+# TEST_CLASS="test_test.go" 
+# TEST_CLASS_DEST="viewservice/" 
+# PROJECT_CLASSES=("go.mod" "viewservice/client.go" "viewservice/common.go" "viewservice/server.go" "pbservice/client.go" "pbservice/common.go" "pbservice/server.go")
+# 
 
 # ============
 # Global Constants
@@ -77,7 +77,7 @@ function print_help {
 	echo "-n|--no-cache: Overwrites previous results if they exist, or appends to \$RESULTS"
 	echo "-r|--regrade: Regrades a student submission by recompiling their files in clean_unzipped"
 	echo "-s|--select: Select a student submission to extract and run"
-	echo "-z|-zipfile: Grade a single zipfile instead of moodle zipfile. No other options will apply"
+	echo "-z|-zipfile: Grade a single zipfile instead of moodle zipfile. Student name used will be 'nok'. No other options will apply"
 }
 
 # ============
@@ -147,6 +147,7 @@ if [[ "$SELECT_STUDENT" = true ]]; then
 		| sort \
 		| uniq \
 	)
+	student_ids+=('nok')
 	SELECTED_STUDENT="$(printf "%s\n" "${student_ids[@]}" | fzf)"
 	if [[ $? -ne 0 ]]; then
 		echo 2> "No student selected. Exiting..."
@@ -176,18 +177,22 @@ unzip -O UTF-8 "${INPUT_ZIPFILE}" -d "${ZIPPED}" > /dev/null
 
 # Process all submissions
 mapfile -t student_submission_groups < <(fdfind -I -t directory "${MOODLE_SUBMISSION_EXTENSION}$" "${ZIPPED}")
+student_submission_groups+=("${CLEAN_UNZIPPED}nok")
 
-test_names=()
 waiting_to_write=()
 results_existed="false"
 if [[ -s "$RESULTS" ]]; then
 	results_existed="true"
 fi
 
+test_names=()
 for student_submission_group in "${student_submission_groups[@]}"; do
 	student_id="$(echo $(basename "${student_submission_group}") | cut -d'_' -f1)"
 	student_submission_unzipped_clean="${CLEAN_UNZIPPED}${student_id}/"
 	if [[ "$SELECT_STUDENT" = true && "${student_id}" != "${SELECTED_STUDENT}" ]]; then
+		continue
+	fi
+	if [[ "$SELECT_STUDENT" = false && "${student_id}" == "nok" ]]; then
 		continue
 	fi
 
